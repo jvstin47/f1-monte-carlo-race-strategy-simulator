@@ -17,7 +17,7 @@ An advanced Formula 1 race strategy simulator powered by a high-performance **Nu
 ## 📐 Mathematical Framework & Assumptions
 
 ### 1. Two-Phase Tire Degradation Model
-$$\text{Degradation}(\text{compound}, \text{age}) = (\text{wear\_rate} \times \text{age}) + \begin{cases} 0 & \text{if } \text{age} \le \text{cliff\_threshold} \\ \text{cliff\_penalty} \times (\text{age} - \text{cliff\_threshold})^2 & \text{if } \text{age} > \text{cliff\_threshold} \end{cases}$$
+$$\text{Degradation}(\text{compound}, \text{age}) = (\text{wear rate} \times \text{age}) + \begin{cases} 0 & \text{if } \text{age} \le \text{cliff threshold} \\ \text{cliff penalty} \times (\text{age} - \text{cliff threshold})^2 & \text{if } \text{age} > \text{cliff threshold} \end{cases}$$
 
 - **Soft Compound (`soft`)**: Wear rate `0.14s/lap`, Cliff threshold Lap `15`, Cliff penalty `0.03`.
 - **Medium Compound (`medium`)**: Wear rate `0.08s/lap`, Cliff threshold Lap `24`, Cliff penalty `0.02`.
