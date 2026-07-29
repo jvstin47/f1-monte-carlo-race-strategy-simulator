@@ -3,8 +3,14 @@ from typing import List, Dict, Any, Optional
 
 class StrategyInput(BaseModel):
     
+    # v4 fields
+    driver_id: str = Field("generic", description="Driver ID for characteristics")
+    enable_track_evolution: bool = Field(True, description="Enable track evolution effect")
+    enable_traffic_loss: bool = Field(True, description="Enable random traffic loss")
+    track_evolution_rate: float = Field(0.02, description="Rate of track evolution")
+
     # v3 fields
-    track_id: Optional[str] = Field(None, description="Track preset ID (bahrain, silverstone, monza, monaco, singapore)")
+    track_id: str = Field("bahrain", description="Track preset ID (bahrain, silverstone, monza, monaco, singapore)")
     weather_enabled: bool = Field(False, description="Enable stochastic weather simulation")
     weather_start_state: str = Field("dry", description="Starting weather state: dry, wet, or mixed")
     weather_pit_threshold: int = Field(3, ge=1, le=10, description="Consecutive damp/wet laps before reactive weather pit")
@@ -111,3 +117,35 @@ class OptimizeResponse(BaseModel):
     expected_time: float
     top_5_alternatives: List[Dict[str, Any]]
     monte_carlo_distribution: Optional[SimulationResponse] = None
+
+class MCTSRequest(BaseModel):
+    track_id: str = Field("bahrain")
+    driver_id: str = Field("generic")
+    available_compounds: List[str] = Field(["soft", "medium", "hard"])
+    max_stops: int = Field(2, ge=1, le=4)
+    risk_aversion: float = Field(0.0, ge=0.0, le=1.0)
+    weather_enabled: bool = Field(False)
+    weather_start_state: str = Field("dry")
+    sc_probability: float = Field(0.04)
+    current_lap: Optional[int] = Field(1, description="Lap to replan from")
+    current_state_overrides: Optional[Dict[str, Any]] = Field(None, description="Overrides for mid-race replanning")
+
+class PolicyRule(BaseModel):
+    condition: str
+    action: str
+
+class DecisionNodeInfo(BaseModel):
+    action: str
+    expected_time: float
+    visit_count: int
+    win_rate: float
+
+class DecisionTreeData(BaseModel):
+    state_description: str
+    candidates: List[DecisionNodeInfo]
+
+class MCTSResponse(BaseModel):
+    policy: List[PolicyRule]
+    expected_time: float
+    win_rate_vs_fixed_dp: Optional[float] = None
+    decision_tree: DecisionTreeData

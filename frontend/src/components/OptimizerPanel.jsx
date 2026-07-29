@@ -4,6 +4,7 @@ import { Cpu, Settings, Activity } from 'lucide-react';
 export default function OptimizerPanel({ trackId, onOptimize, loading }) {
   const [availableCompounds, setAvailableCompounds] = useState(['soft', 'medium', 'hard']);
   const [maxStops, setMaxStops] = useState(2);
+  const [riskAversion, setRiskAversion] = useState(0.0);
 
   const toggleCompound = (comp) => {
     if (availableCompounds.includes(comp)) {
@@ -19,7 +20,8 @@ export default function OptimizerPanel({ trackId, onOptimize, loading }) {
     onOptimize({
       track_id: trackId,
       available_compounds: availableCompounds,
-      max_stops: maxStops
+      max_stops: maxStops,
+      risk_aversion: riskAversion
     });
   };
 
@@ -63,6 +65,24 @@ export default function OptimizerPanel({ trackId, onOptimize, loading }) {
           value={maxStops} 
           onChange={(e) => setMaxStops(parseInt(e.target.value))} 
         />
+      </div>
+
+      <div className="form-group slider-container">
+        <div className="form-label">
+          <span>Risk Aversion</span>
+          <span className="slider-val">{riskAversion.toFixed(1)}</span>
+        </div>
+        <input 
+          type="range" 
+          min="0" 
+          max="1.0" 
+          step="0.1"
+          value={riskAversion} 
+          onChange={(e) => setRiskAversion(parseFloat(e.target.value))} 
+        />
+        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+          0 = Maximize pure pace, 1 = Maximize predictability
+        </div>
       </div>
 
       <button 

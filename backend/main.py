@@ -5,7 +5,8 @@ from typing import Dict, Any
 
 from models import (
     StrategyInput, CompareInput, SimulationResponse, CompareResponse,
-    UndercutInput, UndercutResponse, OptimizeInput, OptimizeResponse
+    UndercutInput, UndercutResponse, OptimizeInput, OptimizeResponse,
+    MCTSRequest, MCTSResponse
 )
 from simulator import (
     simulate_strategy_vectorized, summarize_simulation, compare_strategies,
@@ -13,12 +14,14 @@ from simulator import (
 )
 from fastf1_calibrator import load_and_calibrate_fastf1
 from tracks import TRACKS, get_track
+from drivers import DRIVER_PROFILES, get_driver
 from optimizer import optimize_strategy
+from mcts_optimizer import MCTSSolver, MCTSState
 
 app = FastAPI(
-    title="F1 Monte Carlo Strategy Simulator API v3",
-    description="Vectorized Monte Carlo engine supporting N-stop strategies (1-stop to 4-stop), Safety Cars, Two-Car Undercut modeling, FastF1 real telemetry calibration, Stochastic Weather, and Strategy Optimization.",
-    version="3.0.0"
+    title="F1 Monte Carlo Strategy Simulator API v4",
+    description="Vectorized Monte Carlo engine with MCTS optimizer, driver profiles, realism layer (fuel/track evolution/traffic), N-stop strategies, Safety Cars, Undercut modeling, FastF1 calibration, Stochastic Weather, and Strategy Optimization.",
+    version="4.0.0"
 )
 
 app.add_middleware(
@@ -48,19 +51,29 @@ def resolve_track_params(input_data: StrategyInput) -> Dict[str, Any]:
             data["pit_loss_variance"] = track.get("pit_loss_variance", 0.0)
         except KeyError:
             pass
+            
+    if data.get("driver_id"):
+        driver = get_driver(data["driver_id"])
+        data["driver_pace_offset"] = driver["pace_offset"]
+        data["driver_consistency"] = driver["consistency"]
+        
     return data
 
 @app.get("/")
 def read_root():
     return {
         "status": "online",
-        "service": "F1 Monte Carlo Strategy Simulator v3",
+        "service": "F1 Monte Carlo Strategy Simulator v4",
         "available_compounds": list(DEFAULT_COMPOUNDS.keys())
     }
 
 @app.get("/tracks")
 def get_tracks_endpoint():
     return TRACKS
+
+@app.get("/drivers")
+def get_drivers_endpoint():
+    return DRIVER_PROFILES
 
 @app.post("/optimize", response_model=OptimizeResponse)
 def optimize_endpoint(input_data: OptimizeInput):
@@ -96,7 +109,12 @@ def simulate_endpoint(input_data: StrategyInput):
         pit_loss_variance=resolved_params.get("pit_loss_variance", 0.0),
         weather_enabled=resolved_params.get("weather_enabled", False),
         weather_start_state=resolved_params.get("weather_start_state", "dry"),
-        weather_pit_threshold=resolved_params.get("weather_pit_threshold", 3)
+        weather_pit_threshold=resolved_params.get("weather_pit_threshold", 3),
+        driver_pace_offset=resolved_params.get("driver_pace_offset", 0.0),
+        driver_consistency=resolved_params.get("driver_consistency", resolved_params.get("random_std", 0.15)),
+        enable_track_evolution=resolved_params.get("enable_track_evolution", True),
+        track_evolution_rate=resolved_params.get("track_evolution_rate", 0.02),
+        enable_traffic_loss=resolved_params.get("enable_traffic_loss", True)
     )
 
     summary = summarize_simulation(race_times)
@@ -160,6 +178,73 @@ def undercut_analysis_endpoint(input_data: UndercutInput):
 def fastf1_calibrate_endpoint(year: int = 2023, grand_prix: str = "Bahrain", session_type: str = "R"):
     calibration = load_and_calibrate_fastf1(year=year, grand_prix=grand_prix, session_type=session_type)
     return calibration
+
+
+
+@app.post("/optimize-mcts", response_model=MCTSResponse)
+def optimize_mcts_endpoint(input_data: MCTSRequest):
+    try:
+        track = get_track(input_data.track_id)
+    except KeyError:
+        raise HTTPException(status_code=400, detail=f"Unknown track_id: {input_data.track_id}")
+    driver = get_driver(input_data.driver_id)
+    
+    # Base configuration
+    num_laps = track.get("num_laps", 57)
+    base_lap_time = track.get("base_lap_time", 94.0)
+    pit_stop_loss = track.get("pit_stop_time_loss", 22.0)
+    
+    # Establish starting state for the MCTS
+    start_lap = input_data.current_lap or 1
+    overrides = input_data.current_state_overrides or {}
+    
+    state = MCTSState(
+        lap=start_lap,
+        compound=overrides.get("compound", "medium"),
+        tire_age=overrides.get("tire_age", 1),
+        weather_state=overrides.get("weather_state", input_data.weather_start_state),
+        is_sc_active=overrides.get("is_sc_active", False),
+        stops_made=overrides.get("stops_made", 0)
+    )
+    
+    solver = MCTSSolver(
+        track_id=input_data.track_id,
+        driver_id=input_data.driver_id,
+        num_laps=num_laps,
+        base_lap_time=base_lap_time,
+        pit_stop_loss=pit_stop_loss,
+        available_compounds=input_data.available_compounds,
+        max_stops=input_data.max_stops,
+        sc_prob=input_data.sc_probability,
+        risk_aversion=input_data.risk_aversion,
+        weather_enabled=input_data.weather_enabled,
+        driver_pace_offset=driver["pace_offset"],
+        driver_consistency=driver["consistency"],
+        track_evolution_rate=track.get("track_evolution_rate", 0.02)
+    )
+    
+    solver.search(state, budget=1000)
+    
+    best_act = solver.get_best_action()
+    dt_data = solver.get_decision_tree_data()
+    
+    # Calculate a rough expected time from the best action node
+    expected_time = 0.0
+    for cand in dt_data["candidates"]:
+        if cand["action"] == best_act:
+            expected_time = cand["expected_time"]
+            break
+            
+    # Add time already elapsed if replanning from mid-race (simplified approximation)
+    if start_lap > 1:
+        expected_time += (start_lap - 1) * base_lap_time
+        
+    return {
+        "policy": solver.generate_policy_rules(),
+        "expected_time": expected_time,
+        "win_rate_vs_fixed_dp": None, # Could compute via a side-by-side run here, but skipping for speed
+        "decision_tree": dt_data
+    }
 
 if __name__ == "__main__":
     import uvicorn

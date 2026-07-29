@@ -10,8 +10,12 @@ import WeatherVarianceChart from './components/WeatherVarianceChart';
 import OptimizerPanel from './components/OptimizerPanel';
 import StintTimeline from './components/StintTimeline';
 import AlternativesTable from './components/AlternativesTable';
+import DriverSelector from './components/DriverSelector';
+import DriverImpactChart from './components/DriverImpactChart';
+import RaceSimulatorTab from './components/RaceSimulatorTab';
 
 const DEFAULT_STRATEGY_A = {
+  driver_id: 'generic',
   track_id: 'bahrain',
   compound_1: 'soft',
   compound_2: 'medium',
@@ -29,6 +33,7 @@ const DEFAULT_STRATEGY_A = {
 };
 
 const DEFAULT_STRATEGY_B = {
+  driver_id: 'generic',
   track_id: 'bahrain',
   compound_1: 'medium',
   compound_2: 'hard',
@@ -246,8 +251,8 @@ export default function App() {
         <div className="brand">
           <div className="logo-badge">F1</div>
           <div className="brand-text">
-            <h1>Apex Strategy v3</h1>
-            <p>v3 • Track Selection • Weather Engine • DP Optimizer {tracks[selectedTrackId] ? `• ${tracks[selectedTrackId].name}` : ''}</p>
+            <h1>Apex Strategy v4</h1>
+            <p>v4 • MCTS Engine • Driver Profiles • Realism Layer {tracks[selectedTrackId] ? `• ${tracks[selectedTrackId].name}` : ''}</p>
           </div>
         </div>
 
@@ -263,6 +268,12 @@ export default function App() {
             onClick={() => { setViewTab('sc'); setMode('compare'); }}
           >
             Safety Car
+          </button>
+          <button
+            className={`mode-btn ${viewTab === 'racesim' ? 'active' : ''}`}
+            onClick={() => setViewTab('racesim')}
+          >
+            Race Sim (MCTS)
           </button>
             <button
               className={`mode-btn ${viewTab === 'weather' ? 'active' : ''}`}
@@ -383,6 +394,13 @@ export default function App() {
                 Analyze Undercut Curve
               </button>
             </div>
+          ) : viewTab === 'racesim' ? (
+            <RaceSimulatorTab
+              trackId={selectedTrackId}
+              driverId={strategyA.driver_id}
+              onDriverChange={(d) => setStrategyA(p => ({ ...p, driver_id: d }))}
+              API_BASE={API_BASE}
+            />
           ) : (
             <>
               {mode === 'compare' && (
@@ -443,8 +461,21 @@ export default function App() {
                   weatherEnabled={false}
                 />
               )}
+              
+              {['sim', 'sc', 'weather'].includes(viewTab) && (
+                <DriverSelector 
+                  selectedDriver={mode === 'single' || activeSubTab === 'a' ? strategyA.driver_id : strategyB.driver_id} 
+                  onSelectDriver={(d) => {
+                    if (mode === 'single' || activeSubTab === 'a') {
+                      setStrategyA(p => ({ ...p, driver_id: d }));
+                    } else {
+                      setStrategyB(p => ({ ...p, driver_id: d }));
+                    }
+                  }} 
+                />
+              )}
 
-              {viewTab !== 'optimize' && (
+              {viewTab !== 'optimize' && viewTab !== 'racesim' && (
                 <button className="btn-primary" onClick={handleSimulate} disabled={loading}>
                   {loading ? (
                     <>
@@ -496,12 +527,21 @@ export default function App() {
                 </>
               )}
             </>
+          ) : viewTab === 'racesim' ? (
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: '#9ca3af' }}>
+              MCTS Re-Optimization Panel Active (Left Sidebar)
+            </div>
           ) : (
-            <ResultsChart
-              mode={mode}
-              data={mode === 'single' ? singleResults?.summary?.histogram : compareResults?.combined_histogram}
-              singleSummary={singleResults?.summary}
-            />
+            <>
+              {mode === 'compare' && compareResults && (
+                <DriverImpactChart compareData={compareResults} />
+              )}
+              <ResultsChart
+                mode={mode}
+                data={mode === 'single' ? singleResults?.summary?.histogram : compareResults?.combined_histogram}
+                singleSummary={singleResults?.summary}
+              />
+            </>
           )}
         </div>
       </main>

@@ -6,7 +6,7 @@ client = TestClient(app)
 def test_root():
     response = client.get("/")
     assert response.status_code == 200
-    assert "v3" in response.json()["service"]
+    assert "v4" in response.json()["service"]
 
 def test_simulate_sc_endpoint():
     payload = {

@@ -104,6 +104,11 @@ def simulate_strategy_vectorized(
     weather_enabled: bool = False,
     weather_start_state: str = "dry",
     weather_pit_threshold: int = 3,
+    driver_pace_offset: float = 0.0,
+    driver_consistency: float = 0.15,
+    enable_track_evolution: bool = True,
+    track_evolution_rate: float = 0.02,
+    enable_traffic_loss: bool = True,
     seed: int = None
 ) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
     """
@@ -118,7 +123,19 @@ def simulate_strategy_vectorized(
         compounds=compounds, pit_laps=pit_laps
     )
 
-    random_variations = np.random.normal(0, random_std, size=(num_simulations, num_laps))
+    random_variations = np.random.normal(0, driver_consistency, size=(num_simulations, num_laps))
+    
+    lap_indices = np.arange(1, num_laps + 1)
+    if enable_track_evolution:
+        track_evolution_penalties = -track_evolution_rate * np.log1p(lap_indices)
+    else:
+        track_evolution_penalties = np.zeros(num_laps)
+        
+    if enable_traffic_loss:
+        traffic_prob_matrix = np.random.random((num_simulations, num_laps))
+        traffic_loss_matrix = np.where(traffic_prob_matrix < 0.05, np.random.uniform(0.1, 0.4, size=(num_simulations, num_laps)), 0.0)
+    else:
+        traffic_loss_matrix = np.zeros((num_simulations, num_laps))
     sc_matrix = generate_safety_car_matrix(num_simulations, num_laps, sc_probability=sc_probability, seed=seed)
     sc_occurrence_count = int(np.sum(np.any(sc_matrix, axis=1)))
 
@@ -204,7 +221,10 @@ def simulate_strategy_vectorized(
                 deg = calculate_tire_degradation(compound, tire_age, params)
                 weather_penalty = compute_weather_compound_penalty(compound, weather_state) if weather_enabled else 1.0
                 
-                lap_time = (base_lap_time * weather_penalty) + deg + fuel_penalty + pit_loss + random_variations[sim_idx, lap_idx - 1]
+                track_evol = track_evolution_penalties[lap_idx - 1]
+                traffic = traffic_loss_matrix[sim_idx, lap_idx - 1]
+                
+                lap_time = (base_lap_time * weather_penalty) + deg + fuel_penalty + pit_loss + random_variations[sim_idx, lap_idx - 1] + driver_pace_offset + track_evol + traffic
 
             lap_time_matrix[sim_idx, lap_idx - 1] = lap_time
 
@@ -284,6 +304,11 @@ def compare_strategies(
         weather_enabled=strategy_a.get("weather_enabled", False),
         weather_start_state=strategy_a.get("weather_start_state", "dry"),
         weather_pit_threshold=strategy_a.get("weather_pit_threshold", 3),
+        driver_pace_offset=strategy_a.get("driver_pace_offset", 0.0),
+        driver_consistency=strategy_a.get("driver_consistency", strategy_a.get("random_std", 0.15)),
+        enable_track_evolution=strategy_a.get("enable_track_evolution", True),
+        track_evolution_rate=strategy_a.get("track_evolution_rate", 0.02),
+        enable_traffic_loss=strategy_a.get("enable_traffic_loss", True),
         seed=seed
     )
 
@@ -297,7 +322,6 @@ def compare_strategies(
         base_lap_time=strategy_b.get("base_lap_time", 94.0),
         pit_stop_time_loss=strategy_b.get("pit_stop_time_loss", 22.0),
         num_simulations=num_simulations,
-        random_std=strategy_b.get("random_std", 0.15),
         sc_probability=strategy_b.get("sc_probability", 0.0),
         is_reactive_sc=strategy_b.get("is_reactive_sc", False),
         reactive_window=strategy_b.get("reactive_window", 8),
@@ -308,6 +332,11 @@ def compare_strategies(
         weather_enabled=strategy_b.get("weather_enabled", False),
         weather_start_state=strategy_b.get("weather_start_state", "dry"),
         weather_pit_threshold=strategy_b.get("weather_pit_threshold", 3),
+        driver_pace_offset=strategy_b.get("driver_pace_offset", 0.0),
+        driver_consistency=strategy_b.get("driver_consistency", strategy_b.get("random_std", 0.15)),
+        enable_track_evolution=strategy_b.get("enable_track_evolution", True),
+        track_evolution_rate=strategy_b.get("track_evolution_rate", 0.02),
+        enable_traffic_loss=strategy_b.get("enable_traffic_loss", True),
         seed=seed
     )
 

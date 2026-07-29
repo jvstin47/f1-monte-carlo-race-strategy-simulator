@@ -1,15 +1,16 @@
-# 🏎️ Apex Strategy v3 — F1 Monte Carlo Race Simulator
+# 🏎️ Apex Strategy v4 — F1 Monte Carlo Race Simulator
 
 An advanced Formula 1 race strategy simulator powered by a high-performance **NumPy-vectorized Monte Carlo engine** in Python/FastAPI and an interactive **React telemetry dashboard**.
 
 ---
 
-## 🚀 What's New in v3
+## 🚀 What's New in v4
 
-1. **🌍 Track-Specific Parameters**: 5 distinct F1 circuits with accurate base lap times, pit stop losses, SC probabilities, and tire wear multipliers.
-2. **🌧️ Stochastic Weather Engine**: Markov chain modeling for changing track conditions (Dry $\rightarrow$ Damp $\rightarrow$ Wet), with compound crossover penalties and reactive weather pitting.
-3. **🧠 DP Strategy Optimizer**: Deterministic backward induction optimizer evaluating ~20,000 states in milliseconds to compute the mathematically optimal race strategy and top 5 alternatives.
-4. *(Plus all v2 features: Safety Cars, Two-Car Undercut Engine, and FastF1 Telemetry Calibration)*
+1. **🌳 MCTS Strategy Optimizer**: Monte Carlo Tree Search optimization capable of dynamically replanning mid-race. Evaluates branching stochastic trees under uncertainty (Safety Cars & Weather) to constantly adjust to track conditions.
+2. **🏎️ Driver Characteristics Layer**: 21 unique F1 driver profiles built using a teammate-delta methodology. Incorporates precise pace offsets, consistency metrics ($\sigma$), and data confidence flags based on the 2023 season.
+3. **☔ Rolling Re-Optimization**: Mid-race replanning. Instead of blindly executing a rigid 0-lap strategy, the engine detects stochastic events (Rain, Safety Car) and intelligently calls the MCTS solver to dynamically adjust to changing realities.
+4. **⚠️ Realism & Traffic**: Adds fuel burn effects, track evolution penalties over laps, and stochastic traffic loss.
+5. *(Plus all v3 features: Stochastic Weather, DP Strategy Optimizer, 5 configurable circuits, Two-Car Undercut Engine, and FastF1 Telemetry Validation)*
 
 ---
 
@@ -22,15 +23,17 @@ $$\text{Degradation}(\text{compound}, \text{age}) = (\text{wear\_rate} \times \t
 - **Medium Compound (`medium`)**: Wear rate `0.08s/lap`, Cliff threshold Lap `24`, Cliff penalty `0.02`.
 - **Hard Compound (`hard`)**: Wear rate `0.04s/lap`, Cliff threshold Lap `38`, Cliff penalty `0.01`.
 
-### 2. Stochastic Safety Car & Reactive Pitting
-- **Trigger Probability**: $P(\text{SC}) = 0.04$ per lap.
-- **SC Pace**: Fixed bunched pace (~135% of base lap time).
-- **Discounted Pit Loss**: Pitting under SC reduces pit lane loss from `22.0s` down to `8.0s`.
-- **Reactive Strategy**: If a driver enables *Reactive SC Pitting*, the engine dynamically pits the driver immediately upon SC deployment if the SC occurs within 8 laps of their target pit lap.
+### 2. MCTS & Stochastic Replanning (v4)
+- **UCB1 Algorithm**: Utilizes min-max normalized exploitation terms against a heavily tuned exploration parameter ($C = 0.1$) to find the mathematically optimal decision in highly-variable branching trees.
+- **Dynamic Replanning**: When unexpected heavy rain hits, the rigid DP solver suffers a massive loss (+15s/lap). MCTS detects the weather state transition and executes Rolling Re-Optimization, pitting for Wet tires and outperforming the baseline by 200+ seconds in extreme scenarios.
 
-### 3. Two-Car Undercut & Dirty Air
-- **Dirty Air Penalty**: If $\text{Gap}(A, B) \le 1.5\text{s}$, the trailing car suffers a $+0.25\text{s/lap}$ aerodynamic penalty.
-- **Undercut Curve**: Evaluates track position win rate across relative pit timing deltas (pitting 4 laps before rival to 3 laps after).
+### 3. Driver Characteristics (v4)
+- **Pace Offset**: A fractional lap time multiplier based on teammate delta (e.g. Verstappen `-0.15s/lap`, Sargeant `+0.2s/lap`).
+- **Consistency**: Modifies the `random_std` deviation per lap, allowing some drivers to hit hyper-consistent stints while rookies suffer higher variance.
+
+### 4. Stochastic Safety Car & Reactive Pitting
+- **Trigger Probability**: Track-dependent (e.g. $P(\text{SC}) = 0.04$ per lap).
+- **Discounted Pit Loss**: Pitting under SC reduces pit lane loss from `22.0s` down to `8.0s`.
 
 ---
 
@@ -56,9 +59,11 @@ Swagger interactive docs available at `http://127.0.0.1:8005/docs`.
 
 Endpoints available:
 - `GET /tracks` — Retrieve configured track data
-- `POST /simulate` — 10,000-run Monte Carlo single strategy (includes Weather)
+- `GET /drivers` — Retrieve 21 configured driver profiles
+- `POST /simulate` — 10,000-run Monte Carlo single strategy (includes Weather & Traffic)
 - `POST /compare` — Head-to-head strategy comparison
 - `POST /optimize` — Dynamic Programming strategy optimizer
+- `POST /optimize-mcts` — Dynamic MCTS rolling optimizer
 - `POST /undercut-analysis` — 2-car undercut effectiveness curve
 - `GET /fastf1/calibrate` — Empirical FastF1 calibration data
 
@@ -78,5 +83,5 @@ Open `http://localhost:3000` in your browser.
 backend/venv/bin/python backend/test_simulator.py
 
 # Run API endpoint integration tests
-backend/venv/bin/python backend/test_api.py
+backend/venv/bin/pytest backend/test_api.py -v
 ```
