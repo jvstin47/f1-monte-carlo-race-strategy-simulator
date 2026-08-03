@@ -1,13 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { User, Info } from 'lucide-react';
 
-const API_BASE = 'http://127.0.0.1:8005';
-
-export default function DriverSelector({ selectedDriver, onSelectDriver }) {
+export default function DriverSelector({ API_BASE, selectedDriver, onSelectDriver }) {
+  const apiBase = API_BASE || '';
   const [drivers, setDrivers] = useState({});
 
   useEffect(() => {
-    fetch(`${API_BASE}/drivers`)
+    fetch(`${apiBase}/drivers`)
       .then(res => res.json())
       .then(data => setDrivers(data))
       .catch(err => console.error("Failed to load drivers", err));

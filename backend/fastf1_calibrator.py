@@ -37,7 +37,7 @@ def load_and_calibrate_fastf1(year: int = 2023, grand_prix: str = "Bahrain", ses
     """
     try:
         import fastf1
-        cache_dir = os.path.join(os.path.dirname(__file__), "cache")
+        cache_dir = os.environ.get("FASTF1_CACHE_DIR", os.path.join(os.path.dirname(__file__), "cache"))
         os.makedirs(cache_dir, exist_ok=True)
         fastf1.Cache.enable_cache(cache_dir)
 

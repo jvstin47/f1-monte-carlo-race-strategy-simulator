@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+import os
 import numpy as np
 from typing import Dict, Any
 
@@ -24,15 +25,12 @@ app = FastAPI(
     version="4.0.0"
 )
 
+_origins_env = os.environ.get("ALLOWED_ORIGINS", "*")
+_allowed_origins = [o.strip() for o in _origins_env.split(",")] if _origins_env != "*" else ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "http://127.0.0.1:3000",
-        "http://127.0.0.1:5173",
-        "*"
-    ],
+    allow_origins=_allowed_origins,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -66,6 +64,10 @@ def read_root():
         "service": "F1 Monte Carlo Strategy Simulator v4",
         "available_compounds": list(DEFAULT_COMPOUNDS.keys())
     }
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
 
 @app.get("/tracks")
 def get_tracks_endpoint():
@@ -248,4 +250,5 @@ def optimize_mcts_endpoint(input_data: MCTSRequest):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="127.0.0.1", port=8005, reload=True)
+    port = int(os.environ.get("PORT", 8005))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)

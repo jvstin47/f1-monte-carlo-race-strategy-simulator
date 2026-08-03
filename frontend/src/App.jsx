@@ -61,11 +61,10 @@ const DEFAULT_UNDERCUT_INPUT = {
   num_simulations: 5000
 };
 
-const API_BASE = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' 
-  ? '' 
-  : 'http://127.0.0.1:8005';
+const API_BASE = import.meta.env.VITE_API_BASE_URL || '';
 
 export default function App() {
+  const [serverWaking, setServerWaking] = useState(true);
   const [viewTab, setViewTab] = useState('sim'); // 'sim' | 'sc' | 'weather' | 'undercut' | 'fastf1' | 'optimize'
   const [mode, setMode] = useState('single'); // 'single' | 'compare'
   const [activeSubTab, setActiveSubTab] = useState('a');
@@ -91,6 +90,20 @@ export default function App() {
   const [calibrationData, setCalibrationData] = useState(null);
 
   useEffect(() => {
+    const wakeServer = async () => {
+      const start = Date.now();
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 45000);
+        await fetch(`${API_BASE}/health`, { signal: controller.signal });
+        clearTimeout(timeoutId);
+      } catch (e) {
+        // Server might be waking up, that's okay
+      } finally {
+        setServerWaking(false);
+      }
+    };
+    wakeServer();
     fetchCalibration();
     fetchTracks();
   }, []);
@@ -146,25 +159,19 @@ export default function App() {
         body: JSON.stringify(payload)
       });
     } catch (fetchErr) {
-      // Fallback to direct localhost port 8005
-      const fallbackUrl = url.startsWith('http') ? url : `http://127.0.0.1:8005${url}`;
-      response = await fetch(fallbackUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+      throw fetchErr;
     }
 
     const text = await response.text();
     if (!text || text.trim().length === 0) {
-      throw new Error("Server returned an empty response. Please verify that uvicorn is running on port 8005.");
+      throw new Error("Server returned an empty response. Please verify the backend server is running.");
     }
 
     let data;
     try {
       data = JSON.parse(text);
     } catch (jsonErr) {
-      throw new Error("Received non-JSON response from server. Please verify backend is running on port 8005.");
+      throw new Error("Received non-JSON response from server. Please verify the backend server is running.");
     }
 
     if (!response.ok) {
@@ -220,6 +227,30 @@ export default function App() {
     }
   };
 
+  const handleRunDemo = async () => {
+    setViewTab('sim');
+    const demoStrategy = {
+      ...DEFAULT_STRATEGY_A,
+      track_id: 'bahrain',
+      driver_id: 'verstappen',
+      sc_probability: 0.08,
+      weather_enabled: true,
+      weather_start_state: 'dry',
+      num_simulations: 5000
+    };
+    setStrategyA(demoStrategy);
+    setMode('single');
+    setLoading(true);
+    try {
+      const data = await safeFetchJson(`${API_BASE}/simulate`, demoStrategy);
+      setSingleResults(data);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleOptimize = async (opts) => {
     setLoading(true);
     setError(null);
@@ -246,6 +277,15 @@ export default function App() {
 
   return (
     <div className="app-container">
+      {serverWaking && (
+        <div className="cold-start-overlay">
+          <div className="cold-start-modal">
+            <div className="cold-start-spinner"></div>
+            <h3>Waking up the simulation engine...</h3>
+            <p>Free hosting takes ~30s to start on first visit</p>
+          </div>
+        </div>
+      )}
       {/* App Header */}
       <header className="app-header">
         <div className="brand">
@@ -274,6 +314,9 @@ export default function App() {
             onClick={() => setViewTab('racesim')}
           >
             Race Sim (MCTS)
+          </button>
+          <button className="demo-btn" onClick={handleRunDemo} disabled={loading}>
+            ▶ Run Demo Scenario
           </button>
             <button
               className={`mode-btn ${viewTab === 'weather' ? 'active' : ''}`}
@@ -464,6 +507,7 @@ export default function App() {
               
               {['sim', 'sc', 'weather'].includes(viewTab) && (
                 <DriverSelector 
+                  API_BASE={API_BASE}
                   selectedDriver={mode === 'single' || activeSubTab === 'a' ? strategyA.driver_id : strategyB.driver_id} 
                   onSelectDriver={(d) => {
                     if (mode === 'single' || activeSubTab === 'a') {
