@@ -131,11 +131,15 @@ def simulate_strategy_vectorized(
     else:
         track_evolution_penalties = np.zeros(num_laps)
         
+    # Backmarker Traffic Loss: Simulates probabilistic time lost when catching and passing lapped cars.
+    # Note: This is distinct from the Two-Car Undercut 'dirty_air_penalty', which is a deterministic penalty 
+    # applied only when directly tailing the specific rival car being modeled.
     if enable_traffic_loss:
         traffic_prob_matrix = np.random.random((num_simulations, num_laps))
-        traffic_loss_matrix = np.where(traffic_prob_matrix < 0.05, np.random.uniform(0.1, 0.4, size=(num_simulations, num_laps)), 0.0)
+        backmarker_traffic_loss_matrix = np.where(traffic_prob_matrix < 0.05, np.random.uniform(0.1, 0.4, size=(num_simulations, num_laps)), 0.0)
     else:
-        traffic_loss_matrix = np.zeros((num_simulations, num_laps))
+        backmarker_traffic_loss_matrix = np.zeros((num_simulations, num_laps))
+        
     sc_matrix = generate_safety_car_matrix(num_simulations, num_laps, sc_probability=sc_probability, seed=seed)
     sc_occurrence_count = int(np.sum(np.any(sc_matrix, axis=1)))
 
@@ -222,9 +226,9 @@ def simulate_strategy_vectorized(
                 weather_penalty = compute_weather_compound_penalty(compound, weather_state) if weather_enabled else 1.0
                 
                 track_evol = track_evolution_penalties[lap_idx - 1]
-                traffic = traffic_loss_matrix[sim_idx, lap_idx - 1]
+                t_loss = backmarker_traffic_loss_matrix[sim_idx, lap_idx - 1]
                 
-                lap_time = (base_lap_time * weather_penalty) + deg + fuel_penalty + pit_loss + random_variations[sim_idx, lap_idx - 1] + driver_pace_offset + track_evol + traffic
+                lap_time = (base_lap_time * weather_penalty) + deg + fuel_penalty + pit_loss + random_variations[sim_idx, lap_idx - 1] + driver_pace_offset + track_evol + t_loss
 
             lap_time_matrix[sim_idx, lap_idx - 1] = lap_time
 

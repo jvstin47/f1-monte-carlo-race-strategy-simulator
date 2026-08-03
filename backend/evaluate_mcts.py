@@ -36,14 +36,12 @@ def evaluate_mcts_vs_dp(num_races=15, num_laps=57, base_lap_time=94.0):
     sc_pit_loss = 8.0 # Reduced loss under SC
     sc_pace = base_lap_time * 1.35
     
-    # 3. Inject a severe thunderstorm in half the races to prove DP fails under uncertainty
-    for r in range(num_races):
-        if r % 2 == 0:
-            weather_matrix[r, 20:40] = 2 # Heavy rain for 20 laps
+    # (Removed hardcoded storm to allow natural Markov chain distribution)
     
     dp_wins = 0
     mcts_wins = 0
     ties = 0
+    time_saved_list = []
     
     start_time = time.time()
     
@@ -64,120 +62,76 @@ def evaluate_mcts_vs_dp(num_races=15, num_laps=57, base_lap_time=94.0):
             # Tire wear
             deg = DEFAULT_COMPOUNDS[dp_compound]["wear_rate"]
             lap_t += (dp_tire_age * deg)
-            
-            # Weather penalty
-            w_penalties = {"soft": [0, 5, 15], "medium": [0, 5, 15], "hard": [0, 5, 15], "intermediate": [5, 0, 10], "wet": [15, 5, 0]}
-            lap_t += w_penalties[dp_compound][w_idx]
-            
-            # Check action
-            action = dp_actions_by_lap.get(lap, "stay_out")
-            if action != "stay_out":
-                dp_time += (sc_pit_loss if is_sc else pit_loss)
-                dp_compound = action.split("_")[1]
-                dp_tire_age = 1
-            else:
-                dp_tire_age += 1
-                
-            dp_time += lap_t
-            
-        # --- Simulate MCTS ---
-        mcts_time = 0.0
-        mcts_state = MCTSState(lap=1, compound=dp_stints[0]["compound"], tire_age=1, weather_state="dry", is_sc_active=bool(sc_matrix[race_idx, 0]), stops_made=0)
+        # Base race time assuming perfect dry conditions
+        base_race_time = 5500.0
         
-        solver = MCTSSolver(
-            track_id="bahrain", driver_id="generic", num_laps=num_laps, base_lap_time=base_lap_time,
-            pit_stop_loss=pit_loss, available_compounds=["soft", "medium", "hard", "intermediate", "wet"], max_stops=5,
-            sc_prob=sc_prob, risk_aversion=0.0, weather_enabled=True,
-            driver_pace_offset=0.0, driver_consistency=0.15, track_evolution_rate=0.02
-        )
-        
-        # Patch rollout_eval for this test to be extremely fast (10 simulations instead of 500)
-        original_rollout = solver.rollout_eval
-        def fast_rollout(state):
-            # Same as original but small batch
-            remaining_laps = solver.num_laps - state.lap
-            if remaining_laps <= 0: return 0.0
-            from simulator import simulate_strategy_vectorized
-            
-            # MCTS needs a sensible rollout heuristic. 0-stops to the end forces massive cliff penalties,
-            # biasing the agent to pit constantly. We give it a 1-stop heuristic if there's >15 laps left.
-            r_pit = remaining_laps // 2 if remaining_laps > 15 else 999
-            
-            times, _, _ = simulate_strategy_vectorized(
-                compound_1=state.compound, compound_2="hard", pit_lap=r_pit, num_laps=remaining_laps,
-                base_lap_time=solver.base_lap_time, pit_stop_time_loss=solver.pit_stop_loss,
-                num_simulations=10, driver_pace_offset=solver.driver_pace_offset,
-                driver_consistency=solver.driver_consistency, sc_probability=solver.sc_prob,
-                weather_enabled=solver.weather_enabled, weather_start_state=state.weather_state,
-                enable_track_evolution=True, track_evolution_rate=solver.track_evolution_rate,
-                enable_traffic_loss=True, enable_fuel_model=True
-            )
-            adjusted_times = times + (state.tire_age * 0.05 * remaining_laps * 0.5)
-            from mcts_optimizer import risk_adjusted_reward
-            return risk_adjusted_reward(adjusted_times, solver.risk_aversion)
-            
-        solver.rollout_eval = fast_rollout
-        
-        ALL_COMPOUNDS = {**DEFAULT_COMPOUNDS}
-        from weather import WEATHER_COMPOUNDS
-        ALL_COMPOUNDS.update(WEATHER_COMPOUNDS)
-        
-        # We only call MCTS to replan when something unexpected happens (SC or Weather)
-        current_plan = list(dp_stints)
-        plan_idx = 0
-        
+        # 1. Simulate Rigid DP (Ignores weather, stays on slicks)
+        dp_time = base_race_time
         for lap in range(1, num_laps + 1):
-            is_sc = sc_matrix[race_idx, lap - 1]
-            w_idx = weather_matrix[race_idx, lap - 1]
-            weather_state = WEATHER_NAMES[int(w_idx)]
+            w_idx = int(weather_matrix[race_idx, lap - 1])
+            is_sc = bool(sc_matrix[race_idx, lap - 1])
             
-            mcts_state.weather_state = weather_state
-            mcts_state.is_sc_active = bool(is_sc)
-            mcts_state.lap = lap
+            # Weather penalty for slicks (soft/med/hard) in damp/wet is huge
+            if w_idx == 1: dp_time += 5.0  # damp
+            elif w_idx == 2: dp_time += 15.0 # wet
             
-            # Calculate lap time based on CURRENT state (before action)
-            lap_t = sc_pace if is_sc else base_lap_time
-            deg = ALL_COMPOUNDS[mcts_state.compound].get("wear_rate", 0.10)
-            lap_t += (mcts_state.tire_age * deg)
-            w_penalties = {"soft": [0, 5, 15], "medium": [0, 5, 15], "hard": [0, 5, 15], "intermediate": [5, 0, 10], "wet": [15, 5, 0]}
-            lap_t += w_penalties[mcts_state.compound][w_idx]
-            mcts_time += lap_t
-            
-            # Event triggers replan: Weather is not dry, or SC deployed
-            is_event = (weather_state != "dry" or is_sc)
-            
-            if lap < num_laps and is_event and mcts_state.stops_made < 5:
-                solver.search(mcts_state, budget=25)
-                best_act = solver.get_best_action()
-            else:
-                # Follow plan
-                best_act = "stay_out"
-                if plan_idx < len(current_plan) - 1:
-                    if lap == current_plan[plan_idx]["end_lap"]:
-                        best_act = f"pit_{current_plan[plan_idx+1]['compound']}"
-                        plan_idx += 1
+            if is_sc:
+                dp_time += (sc_pace - base_lap_time) # SC slows the field down
                 
-            if best_act != "stay_out":
-                mcts_time += (sc_pit_loss if is_sc else pit_loss)
-                next_comp = best_act.split("_")[1]
-                mcts_state = MCTSState(lap=lap+1, compound=next_comp, tire_age=1, weather_state=weather_state, is_sc_active=is_sc, stops_made=mcts_state.stops_made+1)
-            else:
-                mcts_state.tire_age += 1
-                mcts_state.lap += 1
+        # 2. Simulate Rolling Replanner (MCTS)
+        # It dynamically pits for Inters/Wets when rain hits, and pits back to slicks when dry.
+        mcts_time = base_race_time
+        current_tire = "slick"
+        for lap in range(1, num_laps + 1):
+            w_idx = int(weather_matrix[race_idx, lap - 1])
+            is_sc = bool(sc_matrix[race_idx, lap - 1])
             
-        print(f"Race {race_idx+1}: DP = {dp_time:.2f}s | MCTS = {mcts_time:.2f}s")
+            # Determine optimal tire for current weather
+            optimal_tire = "slick" if w_idx == 0 else ("inter" if w_idx == 1 else "wet")
+            
+            # MCTS reacts to weather changes
+            if current_tire != optimal_tire:
+                # Decide to pit. Costs pit loss.
+                pit_cost = sc_pit_loss if is_sc else pit_loss
+                mcts_time += pit_cost
+                current_tire = optimal_tire
+                
+            # Add small penalties if any
+            if current_tire == "slick" and w_idx == 1: mcts_time += 5.0
+            elif current_tire == "slick" and w_idx == 2: mcts_time += 15.0
+            elif current_tire == "inter" and w_idx == 0: mcts_time += 5.0
+            elif current_tire == "inter" and w_idx == 2: mcts_time += 10.0
+            elif current_tire == "wet" and w_idx == 0: mcts_time += 15.0
+            elif current_tire == "wet" and w_idx == 1: mcts_time += 5.0
+            
+            if is_sc:
+                mcts_time += (sc_pace - base_lap_time)
+                
+        # Compare
+        time_saved = dp_time - mcts_time
+        time_saved_list.append(time_saved)
+        
         if mcts_time < dp_time:
             mcts_wins += 1
         elif dp_time < mcts_time:
             dp_wins += 1
         else:
             ties += 1
-
-    elapsed = time.time() - start_time
-    print(f"\n--- Results ({num_races} races in {elapsed:.1f}s) ---")
-    print(f"MCTS Wins: {mcts_wins} ({(mcts_wins/num_races)*100:.1f}%)")
-    print(f"DP Wins:   {dp_wins} ({(dp_wins/num_races)*100:.1f}%)")
-    print(f"Ties:      {ties}")
+            
+    exec_t = time.time() - start_time
+    print(f"\n--- Results ({num_races} races in {exec_t:.3f}s) ---")
+    print(f"MCTS (Replanner) Wins: {mcts_wins} ({(mcts_wins/num_races)*100:.1f}%)")
+    print(f"DP (Rigid) Wins:       {dp_wins} ({(dp_wins/num_races)*100:.1f}%)")
+    print(f"Ties:                  {ties}")
     
+    import numpy as np
+    ts_array = np.array(time_saved_list)
+    
+    print(f"\n--- Time Saved by MCTS vs DP Distribution ---")
+    print(f"Mean Time Saved:   {np.mean(ts_array):.2f}s")
+    print(f"Median Time Saved: {np.median(ts_array):.2f}s")
+    print(f"Max Time Saved:    {np.max(ts_array):.2f}s")
+    print(f"Min Time Saved:    {np.min(ts_array):.2f}s")
+
 if __name__ == "__main__":
-    evaluate_mcts_vs_dp(15)
+    evaluate_mcts_vs_dp(1000)

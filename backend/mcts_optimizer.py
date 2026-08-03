@@ -225,7 +225,18 @@ class MCTSSolver:
             
         next_node = action_node.state_children[next_state]
         
-        reward = self._simulate(next_node)
+        future_reward = self._simulate(next_node)
+        
+        # Calculate transition cost (lap time + pit loss) for taking this action
+        pit_loss = self.pit_stop_loss if action_node.action != "stay_out" else 0.0
+        if node.state.is_sc_active and pit_loss > 0:
+            pit_loss = 8.0
+            
+        # Simplified lap time estimate for the tree traversal cost
+        deg_penalty = node.state.tire_age * 0.10
+        lap_time = self.base_lap_time + deg_penalty + pit_loss
+        
+        reward = lap_time + future_reward
         
         # Backpropagate
         action_node.visit_count += 1
