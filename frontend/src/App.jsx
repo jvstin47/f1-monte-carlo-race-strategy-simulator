@@ -90,22 +90,21 @@ export default function App() {
   const [calibrationData, setCalibrationData] = useState(null);
 
   useEffect(() => {
-    const wakeServer = async () => {
-      const start = Date.now();
+    const wakeServerAndLoad = async () => {
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 45000);
         await fetch(`${API_BASE}/health`, { signal: controller.signal });
         clearTimeout(timeoutId);
       } catch (e) {
-        // Server might be waking up, that's okay
+        // Server might be waking up or offline
       } finally {
         setServerWaking(false);
       }
+      // Load initial data after health check attempt completes
+      await Promise.all([fetchCalibration(), fetchTracks()]);
     };
-    wakeServer();
-    fetchCalibration();
-    fetchTracks();
+    wakeServerAndLoad();
   }, []);
 
   const fetchTracks = async () => {
@@ -159,23 +158,26 @@ export default function App() {
         body: JSON.stringify(payload)
       });
     } catch (fetchErr) {
-      throw fetchErr;
+      throw new Error(`Cannot connect to server: ${fetchErr.message}`);
     }
 
     const text = await response.text();
     if (!text || text.trim().length === 0) {
-      throw new Error("Server returned an empty response. Please verify the backend server is running.");
+      throw new Error(`Server returned an empty response (HTTP ${response.status}).`);
     }
 
     let data;
     try {
       data = JSON.parse(text);
     } catch (jsonErr) {
-      throw new Error("Received non-JSON response from server. Please verify the backend server is running.");
+      if (!response.ok) {
+        throw new Error(`Server error (HTTP ${response.status}: ${response.statusText}). If the backend is waking up from sleep, please wait ~30 seconds and try again.`);
+      }
+      throw new Error("Received non-JSON response from server.");
     }
 
     if (!response.ok) {
-      throw new Error(data.detail || 'Simulation request failed');
+      throw new Error(data.detail || `Simulation request failed (HTTP ${response.status})`);
     }
 
     return data;
