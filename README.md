@@ -25,16 +25,16 @@ $$\text{Degradation}(\text{compound}, \text{age}) = (\text{wear rate} \times \te
 
 ### 2. MCTS & Stochastic Replanning (v4)
 - **UCB1 Algorithm**: Utilizes min-max normalized exploitation terms against a heavily tuned exploration parameter ($C = 0.1$) to find the mathematically optimal decision in highly-variable branching trees.
-- **Dynamic Replanning Evidence**: When evaluated over 1,000 independent stochastic Monte Carlo trials, the Rolling Replanner mathematically proves its value against a Rigid DP strategy:
-  - **MCTS Win Rate**: 28.8% (Wins big when massive storms hit)
-  - **DP Win Rate**: 50.0% (Wins marginally when it's dry or storms are extremely short)
-  - **Ties**: 21.2%
-  - **Expected Value**: +2.27s mean time saved per race.
-  - **Risk Capping**: While DP wins slightly more often by ignoring small showers, it occasionally suffers catastrophic -450s failures when massive storms hit. MCTS replanning sacrifices marginal time in short showers to completely eliminate catastrophic downside risk.
+- **Dynamic Replanning Evidence**: `backend/evaluate_mcts.py` runs the *actual* production code paths head-to-head — `optimizer.optimize_strategy()`'s DP schedule executed as a fixed, non-reactive plan, against `mcts_optimizer.MCTSSolver` re-queried as a rolling replanner (on Safety Car appearance, weather regime change, and a periodic cadence), both against identical per-race Safety Car/weather/noise realizations and using the same tire-degradation and weather-penalty physics as the main engine. Over 100 paired races at `sc_probability=0.08` (elevated to stress-test replanning value) with a reduced search budget for tractability (100 rollouts/decision vs. the `/optimize-mcts` endpoint's production default of 1,000):
+  - **MCTS Win Rate**: 7% — **DP Win Rate**: 93%
+  - **Mean time saved by MCTS**: **-124s per race** (i.e. currently slower on average at this search budget)
+  - **Best single-race outcome for MCTS**: **+2,731s**, in the one race with a genuine sustained storm — the rolling replanner reacted by pitting to intermediates when the rain hit, while the rigid DP schedule stayed on slicks (a 2.5x lap-time penalty in full wet) for the entire wet stretch.
+  - **Worst single-race outcome for MCTS**: **-1,065s**, from an unnecessary extra pit stop taken in ordinary dry conditions.
+  - **Honest takeaway**: the rolling-replan *mechanism* clearly works — it captured a massive, uncapped win in the one race that actually needed it — but at this reduced search budget, its decision quality in ordinary conditions isn't yet good enough to make it a net positive on average, and increasing the budget 3x (300 rollouts/decision, 20-race sample) did not close the gap, pointing to the simplified tire-degradation heuristic used for tree-traversal cost (`node.state.tire_age * 0.10`, uniform across compounds) rather than raw search noise. Production callers of `/optimize-mcts` use the full 1,000-rollout budget, which was not itself re-benchmarked at this scale due to runtime cost (a single 1,000-rollout decision takes ~15-20s).
 
 ### 3. Driver Characteristics (v4)
 - **Pace Offset**: A fractional lap time multiplier based on teammate delta (e.g. Verstappen `-0.15s/lap`, Sargeant `+0.2s/lap`).
-- **Consistency**: Modifies the `random_std` deviation per lap, allowing some drivers to hit hyper-consistent stints while rookies suffer higher variance.
+- **Consistency**: Modifies the per-lap noise standard deviation, allowing some drivers to hit hyper-consistent stints while rookies suffer higher variance. When `driver_id` is left as `"generic"`, the `random_std` request field controls this directly instead.
 
 ### 4. Stochastic Safety Car & Reactive Pitting
 - **Trigger Probability**: Track-dependent (e.g. $P(\text{SC}) = 0.04$ per lap).

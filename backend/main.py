@@ -50,11 +50,16 @@ def resolve_track_params(input_data: StrategyInput) -> Dict[str, Any]:
         except KeyError:
             pass
             
-    if data.get("driver_id"):
+    if data.get("driver_id") and data["driver_id"].lower() != "generic":
         driver = get_driver(data["driver_id"])
         data["driver_pace_offset"] = driver["pace_offset"]
         data["driver_consistency"] = driver["consistency"]
-        
+    else:
+        # No named driver selected: let random_std drive lap-time variance directly
+        # instead of always falling back to the generic profile's fixed consistency.
+        data["driver_pace_offset"] = 0.0
+        data["driver_consistency"] = data.get("random_std", 0.15)
+
     return data
 
 @app.get("/")
@@ -84,6 +89,43 @@ def optimize_endpoint(input_data: OptimizeInput):
         available_compounds=input_data.available_compounds,
         max_stops=input_data.max_stops
     )
+
+    track = get_track(input_data.track_id)
+    stints = result["optimal_strategy"]
+    mc_strategy = StrategyInput(
+        track_id=input_data.track_id,
+        compounds=[s["compound"] for s in stints],
+        pit_laps=[s["end_lap"] for s in stints[:-1]],
+        num_laps=track["num_laps"],
+        base_lap_time=track["base_lap_time"],
+        pit_stop_time_loss=track["pit_stop_time_loss"],
+        sc_probability=track.get("sc_probability", 0.04),
+        weather_enabled=input_data.weather_enabled,
+        weather_start_state=input_data.weather_start_state,
+        num_simulations=5000,
+    )
+    resolved = resolve_track_params(mc_strategy)
+    race_times, _, sc_info = simulate_strategy_vectorized(
+        compounds=resolved.get("compounds"),
+        pit_laps=resolved.get("pit_laps"),
+        num_laps=resolved.get("num_laps"),
+        base_lap_time=resolved.get("base_lap_time"),
+        pit_stop_time_loss=resolved.get("pit_stop_time_loss"),
+        num_simulations=resolved.get("num_simulations", 5000),
+        sc_probability=resolved.get("sc_probability", 0.04),
+        tire_wear_multiplier=resolved.get("tire_wear_multiplier"),
+        pit_loss_variance=resolved.get("pit_loss_variance", 0.0),
+        weather_enabled=resolved.get("weather_enabled", False),
+        weather_start_state=resolved.get("weather_start_state", "dry"),
+        driver_pace_offset=resolved.get("driver_pace_offset", 0.0),
+        driver_consistency=resolved.get("driver_consistency", 0.15),
+    )
+    result["monte_carlo_distribution"] = {
+        "race_times": race_times.round(2).tolist(),
+        "summary": summarize_simulation(race_times),
+        "strategy": mc_strategy,
+        "sc_info": sc_info,
+    }
     return result
 
 @app.post("/simulate", response_model=SimulationResponse)

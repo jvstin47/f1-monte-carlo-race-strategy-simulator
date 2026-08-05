@@ -234,7 +234,7 @@ export default function App() {
     const demoStrategy = {
       ...DEFAULT_STRATEGY_A,
       track_id: 'bahrain',
-      driver_id: 'verstappen',
+      driver_id: 'ver',
       sc_probability: 0.08,
       weather_enabled: true,
       weather_start_state: 'dry',
@@ -567,7 +567,7 @@ export default function App() {
                   />
                   <ResultsChart
                     mode="single"
-                    data={optimizeResults.monte_carlo_distribution?.histogram}
+                    data={optimizeResults.monte_carlo_distribution?.summary?.histogram}
                     singleSummary={optimizeResults.monte_carlo_distribution?.summary}
                   />
                 </>

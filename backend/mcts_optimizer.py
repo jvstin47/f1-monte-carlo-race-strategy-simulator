@@ -1,7 +1,7 @@
 import math
 import numpy as np
 from typing import Dict, Any, List, Tuple
-from simulator import simulate_strategy_vectorized
+from simulator import simulate_strategy_vectorized, calculate_tire_degradation
 from weather import TRANSITION_MATRIX
 
 class MCTSState:
@@ -50,7 +50,12 @@ def get_legal_actions(state: MCTSState, max_stops: int, available_compounds: Lis
     actions = ["stay_out"]
     if state.stops_made < max_stops:
         for comp in available_compounds:
-            actions.append(f"pit_{comp}")
+            # Pitting for the exact compound already fitted burns a scarce stop for
+            # no strategic gain (it's not a real option in practice), and left
+            # unfiltered it lets the search waste stops resetting tire age instead
+            # of preserving them for a genuine compound change later.
+            if comp != state.compound:
+                actions.append(f"pit_{comp}")
     return actions
 
 def risk_adjusted_reward(race_times: np.ndarray, risk_aversion: float = 0.0) -> float:
@@ -97,8 +102,9 @@ class MCTSSolver:
                  weather_enabled: bool,
                  driver_pace_offset: float,
                  driver_consistency: float,
-                 track_evolution_rate: float):
-        
+                 track_evolution_rate: float,
+                 rollout_num_simulations: int = 500):
+
         self.track_id = track_id
         self.driver_id = driver_id
         self.num_laps = num_laps
@@ -113,7 +119,8 @@ class MCTSSolver:
         self.driver_pace_offset = driver_pace_offset
         self.driver_consistency = driver_consistency
         self.track_evolution_rate = track_evolution_rate
-        
+        self.rollout_num_simulations = rollout_num_simulations
+
         self.root = None
         
     def rollout_eval(self, state: MCTSState) -> float:
@@ -145,7 +152,7 @@ class MCTSSolver:
             num_laps=remaining_laps,
             base_lap_time=self.base_lap_time,
             pit_stop_time_loss=self.pit_stop_loss,
-            num_simulations=500, # Small batch for rollout
+            num_simulations=self.rollout_num_simulations,
             driver_pace_offset=self.driver_pace_offset,
             driver_consistency=self.driver_consistency,
             sc_probability=self.sc_prob, # SC independent of weather toggle
@@ -157,9 +164,13 @@ class MCTSSolver:
             enable_fuel_model=True
         )
         
-        # Add penalty for already accumulated tire age (rough heuristic:
-        # each lap of existing wear adds ~0.05s degradation penalty)
-        tire_age_penalty = state.tire_age * 0.05 * remaining_laps * 0.5
+        # The rollout above resets tire age to 1 for the current compound, so it misses
+        # the degradation already "owed" from the tires' actual wear. Add that back using
+        # the same degradation curve as the main engine (a one-off cost, not scaled by
+        # remaining_laps, since scaling by remaining_laps would penalize a state with a
+        # freshly-worn tire and a long remaining stint more than a heavily-worn tire near
+        # the end of the race, which is backwards).
+        tire_age_penalty = calculate_tire_degradation(state.compound, state.tire_age)
         adjusted_times = times + tire_age_penalty
         
         return risk_adjusted_reward(adjusted_times, self.risk_aversion)
@@ -235,8 +246,15 @@ class MCTSSolver:
         # Simplified lap time estimate for the tree traversal cost
         deg_penalty = node.state.tire_age * 0.10
         lap_time = self.base_lap_time + deg_penalty + pit_loss
-        
-        reward = lap_time + future_reward
+
+        # future_reward (from rollout_eval / a deeper _simulate call) is a negative
+        # reward (-cost), consistent with risk_adjusted_reward's convention where
+        # higher = better. lap_time is a positive cost, so it must be negated here too
+        # -- otherwise the accumulated reward's meaning drifts with tree depth (shallow
+        # paths stay dominated by the large negative rollout estimate while deep paths
+        # trend toward the raw positive total race time), which lets UCB1 lock onto
+        # whichever action happens to get explored deepest rather than the fastest one.
+        reward = -lap_time + future_reward
         
         # Backpropagate
         action_node.visit_count += 1

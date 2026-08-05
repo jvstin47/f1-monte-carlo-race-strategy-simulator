@@ -7,6 +7,7 @@ __pycache__/
 backend/venv/
 backend/.env
 backend/.pytest_cache/
+backend/cache/
 
 # Node
 frontend/node_modules/
