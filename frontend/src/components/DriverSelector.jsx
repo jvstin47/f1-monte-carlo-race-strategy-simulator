@@ -1,17 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { User, Info } from 'lucide-react';
 
-export default function DriverSelector({ API_BASE, selectedDriver, onSelectDriver }) {
-  const apiBase = API_BASE || '';
-  const [drivers, setDrivers] = useState({});
-
-  useEffect(() => {
-    fetch(`${apiBase}/drivers`)
-      .then(res => res.json())
-      .then(data => setDrivers(data))
-      .catch(err => console.error("Failed to load drivers", err));
-  }, []);
-
+export default function DriverSelector({ drivers = {}, selectedDriver, onSelectDriver }) {
   const current = drivers[selectedDriver];
 
   return (

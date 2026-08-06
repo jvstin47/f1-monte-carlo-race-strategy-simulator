@@ -111,6 +111,7 @@ class OptimizeInput(BaseModel):
     max_stops: int = Field(2, ge=1, le=4)
     weather_enabled: bool = Field(False)
     weather_start_state: str = Field("dry")
+    risk_aversion: float = Field(0.0, ge=0.0, le=1.0, description="0 = pick the pure fastest expected strategy; 1 = weigh a candidate's Monte Carlo variance heavily against its speed")
 
 class OptimizeResponse(BaseModel):
     optimal_strategy: List[StintSegment]

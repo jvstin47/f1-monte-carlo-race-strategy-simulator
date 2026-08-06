@@ -71,6 +71,7 @@ export default function App() {
 
   const [tracks, setTracks] = useState({});
   const [selectedTrackId, setSelectedTrackId] = useState('bahrain');
+  const [drivers, setDrivers] = useState({});
 
   const [strategyA, setStrategyA] = useState(DEFAULT_STRATEGY_A);
   const [strategyB, setStrategyB] = useState(DEFAULT_STRATEGY_B);
@@ -102,7 +103,7 @@ export default function App() {
         setServerWaking(false);
       }
       // Load initial data after health check attempt completes
-      await Promise.all([fetchCalibration(), fetchTracks()]);
+      await Promise.all([fetchCalibration(), fetchTracks(), fetchDrivers()]);
     };
     wakeServerAndLoad();
   }, []);
@@ -116,6 +117,18 @@ export default function App() {
       }
     } catch (err) {
       console.error("Failed to fetch tracks", err);
+    }
+  };
+
+  const fetchDrivers = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/drivers`);
+      if (res.ok) {
+        const data = await res.json();
+        setDrivers(data);
+      }
+    } catch (err) {
+      console.error("Failed to fetch drivers", err);
     }
   };
 
@@ -445,6 +458,7 @@ export default function App() {
               driverId={strategyA.driver_id}
               onDriverChange={(d) => setStrategyA(p => ({ ...p, driver_id: d }))}
               API_BASE={API_BASE}
+              drivers={drivers}
             />
           ) : (
             <>
@@ -508,9 +522,9 @@ export default function App() {
               )}
               
               {['sim', 'sc', 'weather'].includes(viewTab) && (
-                <DriverSelector 
-                  API_BASE={API_BASE}
-                  selectedDriver={mode === 'single' || activeSubTab === 'a' ? strategyA.driver_id : strategyB.driver_id} 
+                <DriverSelector
+                  drivers={drivers}
+                  selectedDriver={mode === 'single' || activeSubTab === 'a' ? strategyA.driver_id : strategyB.driver_id}
                   onSelectDriver={(d) => {
                     if (mode === 'single' || activeSubTab === 'a') {
                       setStrategyA(p => ({ ...p, driver_id: d }));
@@ -580,7 +594,7 @@ export default function App() {
           ) : (
             <>
               {mode === 'compare' && compareResults && (
-                <DriverImpactChart compareData={compareResults} />
+                <DriverImpactChart compareData={compareResults} drivers={drivers} />
               )}
               <ResultsChart
                 mode={mode}

@@ -11,7 +11,7 @@ const COMPOUND_COLORS = {
   wet: '#3b82f6'
 };
 
-export default function RaceSimulatorTab({ trackId, driverId, onDriverChange, API_BASE }) {
+export default function RaceSimulatorTab({ trackId, driverId, onDriverChange, API_BASE, drivers }) {
   const [currentLap, setCurrentLap] = useState(1);
   const [riskAversion, setRiskAversion] = useState(0.2);
   const [stateOverrides, setStateOverrides] = useState({
@@ -168,7 +168,7 @@ export default function RaceSimulatorTab({ trackId, driverId, onDriverChange, AP
       </div>
 
       {/* Driver Selector */}
-      <DriverSelector selectedDriver={driverId} onSelectDriver={onDriverChange} />
+      <DriverSelector drivers={drivers} selectedDriver={driverId} onSelectDriver={onDriverChange} />
 
       {/* Risk Aversion */}
       <div className="card" style={{ marginTop: '1rem' }}>

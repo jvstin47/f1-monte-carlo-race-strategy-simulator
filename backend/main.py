@@ -87,7 +87,8 @@ def optimize_endpoint(input_data: OptimizeInput):
     result = optimize_strategy(
         track_id=input_data.track_id,
         available_compounds=input_data.available_compounds,
-        max_stops=input_data.max_stops
+        max_stops=input_data.max_stops,
+        risk_aversion=input_data.risk_aversion
     )
 
     track = get_track(input_data.track_id)

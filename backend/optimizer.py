@@ -1,5 +1,6 @@
 from typing import List, Dict, Any, Optional, Tuple
-from simulator import calculate_tire_degradation, DEFAULT_COMPOUNDS
+import numpy as np
+from simulator import calculate_tire_degradation, DEFAULT_COMPOUNDS, simulate_strategy_vectorized
 from tracks import get_track
 from weather import WEATHER_COMPOUNDS
 
@@ -9,13 +10,24 @@ def optimize_strategy(
     max_stops: int = 2,
     enable_fuel_model: bool = True,
     fuel_effect_per_lap: float = 0.033,
+    risk_aversion: float = 0.0,
 ) -> Dict[str, Any]:
     """
     Deterministic DP via backward induction.
     State: (lap, compound_idx, tire_age, stops_made)
     Action: stay_out | pit_for(new_compound)
-    
+
     F1 constraint: must use at least 2 different dry compounds.
+
+    risk_aversion (0-1): the DP table itself is fully deterministic (no
+    variance concept), so it always finds the pure-expected-time-minimal
+    plan *per starting compound*. To make risk_aversion do something real
+    rather than just accepting and discarding it, each starting-compound
+    candidate is priced with a real Monte Carlo run and the candidates are
+    re-ranked by `expected_time + risk_aversion * std_dev`, using the same
+    mean+risk*std convention as mcts_optimizer.risk_adjusted_reward. At
+    risk_aversion=0 this is identical to the previous pure-expected-time
+    ranking.
     """
     if available_compounds is None:
         available_compounds = ["soft", "medium", "hard"]
@@ -106,8 +118,35 @@ def optimize_strategy(
                     "start_compound": compounds[c_idx],
                 })
 
-    results.sort(key=lambda x: x["expected_time"])
-    
+    if risk_aversion > 0 and results:
+        # Price each starting-compound candidate with a real Monte Carlo run so
+        # risk_aversion has an actual variance figure to weigh against, instead
+        # of being accepted and silently discarded.
+        for r in results:
+            comp_list = [s["compound"] for s in r["stints"]]
+            pit_laps_list = [s["end_lap"] for s in r["stints"][:-1]]
+            times, _, _ = simulate_strategy_vectorized(
+                compounds=comp_list,
+                pit_laps=pit_laps_list,
+                num_laps=num_laps,
+                base_lap_time=base_lap_time,
+                pit_stop_time_loss=pit_stop_time_loss,
+                num_simulations=2000,
+                sc_probability=track.get("sc_probability", 0.04),
+                tire_wear_multiplier=tire_wear_mult,
+                enable_fuel_model=enable_fuel_model,
+                fuel_effect_per_lap=fuel_effect_per_lap,
+                seed=42,
+            )
+            r["std_dev"] = round(float(np.std(times)), 2)
+            r["risk_score"] = round(r["expected_time"] + risk_aversion * r["std_dev"], 2)
+        results.sort(key=lambda x: x["risk_score"])
+    else:
+        for r in results:
+            r["std_dev"] = None
+            r["risk_score"] = r["expected_time"]
+        results.sort(key=lambda x: x["expected_time"])
+
     if not results:
         return {
             "optimal_strategy": [{"compound": "medium", "start_lap": 1, "end_lap": num_laps // 2},
@@ -115,10 +154,10 @@ def optimize_strategy(
             "expected_time": 0.0,
             "top_5_alternatives": [],
         }
-    
+
     optimal = results[0]
     top_5 = results[:5]
-    
+
     return {
         "optimal_strategy": optimal["stints"],
         "expected_time": optimal["expected_time"],
@@ -128,6 +167,7 @@ def optimize_strategy(
                 "stints": r["stints"],
                 "expected_time": r["expected_time"],
                 "delta_to_optimal": round(r["expected_time"] - optimal["expected_time"], 2),
+                "std_dev": r["std_dev"],
             }
             for i, r in enumerate(top_5)
         ],

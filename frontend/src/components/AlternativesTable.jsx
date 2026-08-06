@@ -3,6 +3,8 @@ import React from 'react';
 export default function AlternativesTable({ alternatives, optimalTime }) {
   if (!alternatives || alternatives.length === 0) return null;
 
+  const hasRisk = alternatives.some(alt => alt.std_dev != null);
+
   return (
     <div className="card" style={{ marginBottom: '1.5rem' }}>
       <div className="card-title">Top Strategy Alternatives</div>
@@ -14,15 +16,16 @@ export default function AlternativesTable({ alternatives, optimalTime }) {
             <th>Strategy</th>
             <th>Expected Time</th>
             <th>Delta to Optimal</th>
+            {hasRisk && <th title="Standard deviation from a Monte Carlo run of this candidate — how much the Risk Aversion slider weighs against raw speed">Risk (σ)</th>}
           </tr>
         </thead>
         <tbody>
           {alternatives.map((alt, idx) => {
             const mins = Math.floor(alt.expected_time / 60);
             const secs = (alt.expected_time % 60).toFixed(2);
-            
+
             const isOptimal = idx === 0; // The first item should be the optimal one, or we highlight rank 1
-            
+
             return (
               <tr key={idx} className={isOptimal ? 'optimal' : ''}>
                 <td>#{alt.rank}</td>
@@ -43,6 +46,7 @@ export default function AlternativesTable({ alternatives, optimalTime }) {
                 <td style={{ color: isOptimal ? 'var(--strat-a)' : 'var(--text-muted)' }}>
                   {alt.delta_to_optimal > 0 ? `+${alt.delta_to_optimal.toFixed(2)}s` : '-'}
                 </td>
+                {hasRisk && <td>{alt.std_dev != null ? `±${alt.std_dev.toFixed(2)}s` : '-'}</td>}
               </tr>
             );
           })}
