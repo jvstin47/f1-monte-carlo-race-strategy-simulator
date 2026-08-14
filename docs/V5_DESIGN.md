@@ -2,7 +2,7 @@
 
 **Project:** Apex Strategy
 **Version:** v5
-**Status:** Proposed
+**Status:** In progress — Phases 1-4 of 7 done (see §27)
 **Primary Goal:** Improve MCTS decision quality in ordinary race conditions by replacing its
 overly simplified traversal assumptions with a calibrated hybrid search architecture.
 
@@ -530,15 +530,20 @@ MCTS experiments must support deterministic seeds. A benchmark should be reprodu
 
 - **Phase 1 — Instrumentation.** Build the calibration harness. No major MCTS changes yet.
   Deliverable: quantitative evidence showing where the current heuristic disagrees with the
-  simulator. *(In progress — see status note in §19.)*
+  simulator. *(Done — see §19 status note and `docs/PHASE1_CALIBRATION_RESULTS.md`.)*
 - **Phase 2 — Heuristic Upgrade.** Improve tire, fuel, pit, weather and strategic-flexibility
   evaluation. Deliverable: better branch ranking without high-fidelity rollouts.
+  *(Done — `backend/heuristic_evaluator.py`; see `docs/PHASE2_4_RESULTS.md`.)*
 - **Phase 3 — Hybrid Rollout Engine.** Implement selective Monte Carlo evaluation.
   Deliverable: MCTS can selectively replace heuristic estimates with simulator-derived
-  rewards.
+  rewards. *(Done — `MCTSSolver._should_use_high_fidelity` / `heuristic_eval` in
+  `backend/mcts_optimizer.py`; Triggers A/B deferred to Phase 4's top-K mechanism, see
+  `docs/PHASE2_4_RESULTS.md`.)*
 - **Phase 4 — Adaptive Budgeting.** Implement progressive rollout budgets, uncertainty-based
   evaluation, candidate prioritization. Deliverable: computational effort concentrated on
-  strategically important nodes.
+  strategically important nodes. *(Done, in a simplified form — `MCTSSolver.search`'s
+  `refine_top_k` top-K post-search refinement, not the full per-node progressive-budget tiers
+  from §14; see `docs/PHASE2_4_RESULTS.md`.)*
 - **Phase 5 — Risk Integration.** Integrate Risk Aversion into MCTS reward. Deliverable: MCTS
   produces different strategies according to risk preference.
 - **Phase 6 — Benchmark Suite.** Run all scenario groups against baseline, v4 MCTS, DP, and v5

@@ -265,11 +265,12 @@ def optimize_mcts_endpoint(input_data: MCTSRequest):
         weather_enabled=input_data.weather_enabled,
         driver_pace_offset=driver["pace_offset"],
         driver_consistency=driver["consistency"],
-        track_evolution_rate=track.get("track_evolution_rate", 0.02)
+        track_evolution_rate=track.get("track_evolution_rate", 0.02),
+        use_hybrid_evaluation=input_data.use_hybrid_evaluation
     )
-    
-    solver.search(state, budget=1000)
-    
+
+    solver.search(state, budget=input_data.search_budget, refine_top_k=input_data.refine_top_k)
+
     best_act = solver.get_best_action()
     dt_data = solver.get_decision_tree_data()
     
@@ -288,7 +289,8 @@ def optimize_mcts_endpoint(input_data: MCTSRequest):
         "policy": solver.generate_policy_rules(),
         "expected_time": expected_time,
         "win_rate_vs_fixed_dp": None, # Could compute via a side-by-side run here, but skipping for speed
-        "decision_tree": dt_data
+        "decision_tree": dt_data,
+        "diagnostics": solver.get_search_stats()
     }
 
 if __name__ == "__main__":

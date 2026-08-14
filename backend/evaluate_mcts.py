@@ -94,14 +94,24 @@ def simulate_mcts_rolling(weather_matrix, sc_matrix, noise_matrix, num_laps,
                            base_lap_time, pit_stop_time_loss, sc_pit_loss,
                            fuel_effect_per_lap, track_id, max_stops, sc_prob,
                            risk_aversion, mcts_budget,
-                           mcts_rollout_sims, replan_interval):
+                           mcts_rollout_sims, replan_interval,
+                           use_hybrid_evaluation=True, refine_top_k=0,
+                           refine_sample_weight=3):
     """Execute the real MCTSSolver as a rolling replanner: re-query it at race
     start, whenever a Safety Car appears, whenever the weather regime changes,
-    and periodically every `replan_interval` laps otherwise."""
+    and periodically every `replan_interval` laps otherwise.
+
+    use_hybrid_evaluation=True runs the v5 hybrid solver (cheap heuristic
+    leaves by default, escalating on triggers -- see mcts_optimizer.py);
+    False reproduces the original v4 solver (every leaf gets a real Monte
+    Carlo rollout), so the two can be benchmarked head-to-head against
+    identical race conditions and an identical iteration budget."""
     num_races = weather_matrix.shape[0]
     sc_pace = base_lap_time * 1.35
 
     times = np.zeros(num_races)
+    total_high_fidelity = 0
+    total_heuristic = 0
     for r in range(num_races):
         compound = "medium"
         tire_age = 1
@@ -144,11 +154,16 @@ def simulate_mcts_rolling(weather_matrix, sc_matrix, noise_matrix, num_laps,
                     available_compounds=candidate_compounds, max_stops=max_stops,
                     sc_prob=sc_prob, risk_aversion=risk_aversion, weather_enabled=True,
                     driver_pace_offset=0.0, driver_consistency=0.15,
-                    track_evolution_rate=0.0, rollout_num_simulations=mcts_rollout_sims
+                    track_evolution_rate=0.0, rollout_num_simulations=mcts_rollout_sims,
+                    use_hybrid_evaluation=use_hybrid_evaluation
                 )
-                solver.search(state, budget=mcts_budget)
+                solver.search(state, budget=mcts_budget, refine_top_k=refine_top_k,
+                               refine_sample_weight=refine_sample_weight)
                 pending_action = solver.get_best_action()
                 last_replan_lap = lap
+                stats = solver.get_search_stats()
+                total_high_fidelity += stats["high_fidelity_rollouts"]
+                total_heuristic += stats["heuristic_evaluations"]
 
             last_weather_idx = w_idx
             last_is_sc = is_sc
@@ -168,11 +183,40 @@ def simulate_mcts_rolling(weather_matrix, sc_matrix, noise_matrix, num_laps,
 
             total += lt
         times[r] = total
-    return times
+    return times, {"high_fidelity_rollouts": total_high_fidelity, "heuristic_evaluations": total_heuristic}
+
+
+def _compare(baseline_label, baseline_times, candidate_label, candidate_times, num_races):
+    """Head-to-head summary between a baseline and a candidate over identical
+    races. Sign convention matches this project's established one throughout
+    (docs/archive/PROJECT_STATUS_v4.md, the original evaluate_mcts.py):
+    `time_saved = baseline - candidate`, so POSITIVE means the candidate was
+    FASTER (saved time relative to the baseline), negative means the
+    candidate was slower."""
+    diff = baseline_times - candidate_times  # positive = candidate faster
+    baseline_wins = int(np.sum(baseline_times < candidate_times))
+    candidate_wins = int(np.sum(candidate_times < baseline_times))
+    ties = num_races - baseline_wins - candidate_wins
+    return {
+        f"{baseline_label}_win_pct": round(baseline_wins / num_races * 100, 1),
+        f"{candidate_label}_win_pct": round(candidate_wins / num_races * 100, 1),
+        "tie_pct": round(ties / num_races * 100, 1),
+        f"mean_time_saved_by_{candidate_label}": round(float(np.mean(diff)), 2),
+        f"median_time_saved_by_{candidate_label}": round(float(np.median(diff)), 2),
+        f"max_time_saved_by_{candidate_label}": round(float(np.max(diff)), 2),
+        f"min_time_saved_by_{candidate_label}": round(float(np.min(diff)), 2),
+    }
 
 
 def evaluate_mcts_vs_dp(num_races=25, track_id="bahrain", seed=42,
-                         mcts_budget=60, mcts_rollout_sims=120, replan_interval=6):
+                         mcts_budget=60, mcts_rollout_sims=120, replan_interval=6,
+                         run_v4_classic=True, refine_top_k=2, refine_sample_weight=3):
+    """Three-way empirical comparison, all against identical per-race weather/
+    Safety Car/noise realizations: the DP-optimal fixed schedule, the v4
+    "classic" MCTS (every leaf gets a real Monte Carlo rollout), and the v5
+    hybrid MCTS (cheap heuristic leaves by default, selective escalation --
+    see mcts_optimizer.py). Set run_v4_classic=False to skip the v4 arm and
+    only benchmark v5 vs. DP (faster)."""
     np.random.seed(seed)
 
     track = get_track(track_id)
@@ -198,50 +242,61 @@ def evaluate_mcts_vs_dp(num_races=25, track_id="bahrain", seed=42,
         base_lap_time, pit_stop_time_loss, sc_pit_loss, fuel_effect_per_lap
     )
 
-    print(f"Running MCTS rolling replanner over {num_races} races "
-          f"(budget={mcts_budget}, rollout_sims={mcts_rollout_sims})...")
-    start_time = time.time()
-    mcts_times = simulate_mcts_rolling(
+    results = {"num_races": num_races, "track_id": track_id}
+
+    if run_v4_classic:
+        print(f"\nRunning v4 classic MCTS (every leaf = real rollout) over {num_races} races "
+              f"(budget={mcts_budget}, rollout_sims={mcts_rollout_sims})...")
+        t0 = time.time()
+        v4_times, v4_diag = simulate_mcts_rolling(
+            weather_matrix, sc_matrix, noise_matrix, num_laps, base_lap_time,
+            pit_stop_time_loss, sc_pit_loss, fuel_effect_per_lap, track_id=track_id,
+            max_stops=max_stops, sc_prob=sc_prob, risk_aversion=0.3,
+            mcts_budget=mcts_budget, mcts_rollout_sims=mcts_rollout_sims,
+            replan_interval=replan_interval, use_hybrid_evaluation=False
+        )
+        v4_exec_t = time.time() - t0
+        print(f"  done in {v4_exec_t:.1f}s ({v4_diag['high_fidelity_rollouts']} rollouts, "
+              f"{v4_diag['heuristic_evaluations']} heuristic evals)")
+        results["v4_classic_vs_dp"] = _compare("dp", dp_times, "v4_classic", v4_times, num_races)
+        results["v4_classic_exec_seconds"] = round(v4_exec_t, 1)
+        results["v4_classic_diagnostics"] = v4_diag
+
+    print(f"\nRunning v5 hybrid MCTS (selective escalation + top-{refine_top_k} adaptive "
+          f"refinement) over {num_races} races (budget={mcts_budget}, rollout_sims={mcts_rollout_sims})...")
+    t0 = time.time()
+    v5_times, v5_diag = simulate_mcts_rolling(
         weather_matrix, sc_matrix, noise_matrix, num_laps, base_lap_time,
         pit_stop_time_loss, sc_pit_loss, fuel_effect_per_lap, track_id=track_id,
         max_stops=max_stops, sc_prob=sc_prob, risk_aversion=0.3,
         mcts_budget=mcts_budget, mcts_rollout_sims=mcts_rollout_sims,
-        replan_interval=replan_interval
+        replan_interval=replan_interval, use_hybrid_evaluation=True,
+        refine_top_k=refine_top_k, refine_sample_weight=refine_sample_weight
     )
-    exec_t = time.time() - start_time
+    v5_exec_t = time.time() - t0
+    print(f"  done in {v5_exec_t:.1f}s ({v5_diag['high_fidelity_rollouts']} rollouts, "
+          f"{v5_diag['heuristic_evaluations']} heuristic evals)")
+    results["v5_hybrid_vs_dp"] = _compare("dp", dp_times, "v5_hybrid", v5_times, num_races)
+    results["v5_hybrid_exec_seconds"] = round(v5_exec_t, 1)
+    results["v5_hybrid_diagnostics"] = v5_diag
 
-    time_saved = dp_times - mcts_times
-    mcts_wins = int(np.sum(mcts_times < dp_times))
-    dp_wins = int(np.sum(dp_times < mcts_times))
-    ties = num_races - mcts_wins - dp_wins
+    if run_v4_classic:
+        results["v5_hybrid_vs_v4_classic"] = _compare("v4_classic", v4_times, "v5_hybrid", v5_times, num_races)
 
-    print(f"\n--- Results ({num_races} races, MCTS replanning took {exec_t:.1f}s) ---")
-    print(f"MCTS (Rolling Replanner) Wins: {mcts_wins} ({mcts_wins / num_races * 100:.1f}%)")
-    print(f"DP (Rigid) Wins:                {dp_wins} ({dp_wins / num_races * 100:.1f}%)")
-    print(f"Ties:                           {ties} ({ties / num_races * 100:.1f}%)")
+    print(f"\n=== Summary ({num_races} races, {track_id}) ===")
+    if run_v4_classic:
+        c = results["v4_classic_vs_dp"]
+        print(f"v4 classic MCTS vs DP:  MCTS wins {c['v4_classic_win_pct']}%, DP wins {c['dp_win_pct']}%, "
+              f"mean time saved by MCTS {c['mean_time_saved_by_v4_classic']}s  [{v4_exec_t:.1f}s wall]")
+    h = results["v5_hybrid_vs_dp"]
+    print(f"v5 hybrid MCTS vs DP:   MCTS wins {h['v5_hybrid_win_pct']}%, DP wins {h['dp_win_pct']}%, "
+          f"mean time saved by MCTS {h['mean_time_saved_by_v5_hybrid']}s  [{v5_exec_t:.1f}s wall]")
+    if run_v4_classic:
+        vv = results["v5_hybrid_vs_v4_classic"]
+        print(f"v5 hybrid vs v4 classic: v5 wins {vv['v5_hybrid_win_pct']}%, v4 wins {vv['v4_classic_win_pct']}%, "
+              f"mean time saved by v5 {vv['mean_time_saved_by_v5_hybrid']}s")
 
-    print(f"\n--- Time Saved by MCTS vs DP (seconds, positive = MCTS faster) ---")
-    print(f"Mean:   {np.mean(time_saved):.2f}s")
-    print(f"Median: {np.median(time_saved):.2f}s")
-    print(f"Max:    {np.max(time_saved):.2f}s")
-    print(f"Min:    {np.min(time_saved):.2f}s")
-
-    print(f"\n--- Worst-Case Downside Risk ---")
-    print(f"DP worst race:   {np.max(dp_times):.2f}s (vs its own median {np.median(dp_times):.2f}s)")
-    print(f"MCTS worst race: {np.max(mcts_times):.2f}s (vs its own median {np.median(mcts_times):.2f}s)")
-
-    return {
-        "num_races": num_races,
-        "mcts_win_pct": round(mcts_wins / num_races * 100, 1),
-        "dp_win_pct": round(dp_wins / num_races * 100, 1),
-        "tie_pct": round(ties / num_races * 100, 1),
-        "mean_time_saved": round(float(np.mean(time_saved)), 2),
-        "median_time_saved": round(float(np.median(time_saved)), 2),
-        "dp_worst_case": round(float(np.max(dp_times)), 2),
-        "mcts_worst_case": round(float(np.max(mcts_times)), 2),
-        "dp_median": round(float(np.median(dp_times)), 2),
-        "mcts_median": round(float(np.median(mcts_times)), 2),
-    }
+    return results
 
 
 if __name__ == "__main__":

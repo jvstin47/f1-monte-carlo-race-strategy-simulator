@@ -130,6 +130,9 @@ class MCTSRequest(BaseModel):
     sc_probability: float = Field(0.04)
     current_lap: Optional[int] = Field(1, description="Lap to replan from")
     current_state_overrides: Optional[Dict[str, Any]] = Field(None, description="Overrides for mid-race replanning")
+    search_budget: int = Field(1000, ge=10, le=5000, description="MCTS iterations to spend on this decision")
+    use_hybrid_evaluation: bool = Field(True, description="v5: cheap heuristic leaves by default, escalating to real Monte Carlo rollouts on strategic triggers. False reproduces v4 behavior (every leaf is a real rollout).")
+    refine_top_k: int = Field(2, ge=0, le=5, description="v5 Phase 4: after the main search, spend extra real rollouts refining this many top root candidates. 0 disables.")
 
 class PolicyRule(BaseModel):
     condition: str
@@ -150,3 +153,4 @@ class MCTSResponse(BaseModel):
     expected_time: float
     win_rate_vs_fixed_dp: Optional[float] = None
     decision_tree: DecisionTreeData
+    diagnostics: Optional[Dict[str, Any]] = Field(None, description="v5: nodes_created, heuristic_evaluations, high_fidelity_rollouts, trigger_counts from MCTSSolver.get_search_stats()")
