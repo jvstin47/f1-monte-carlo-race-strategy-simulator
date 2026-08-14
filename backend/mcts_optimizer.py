@@ -3,7 +3,7 @@ import numpy as np
 from typing import Dict, Any, List, Tuple
 from simulator import simulate_strategy_vectorized, calculate_tire_degradation
 from weather import TRANSITION_MATRIX
-from heuristic_evaluator import per_lap_cost, playout_cost, strategic_flexibility_bonus
+from heuristic_evaluator import per_lap_cost, playout_cost, strategic_flexibility_bonus, heuristic_uncertainty
 
 class MCTSState:
     def __init__(self, lap: int, compound: str, tire_age: int, weather_state: str, is_sc_active: bool, stops_made: int):
@@ -211,13 +211,15 @@ class MCTSSolver:
         return risk_adjusted_reward(adjusted_times, self.risk_aversion)
 
     def heuristic_eval(self, state: MCTSState) -> float:
-        """v5 Phase 3: cheap default leaf evaluation. Same playout policy as
-        rollout_eval (project forward on the current compound, no further
-        stops) but priced with heuristic_evaluator's closed-form, real
-        per-compound components instead of a Monte Carlo run. No variance
-        estimate is available from a closed-form projection, so risk_aversion
-        has no effect on heuristic-evaluated leaves -- only on high-fidelity
-        ones (a known, documented asymmetry, not an oversight)."""
+        """v5 Phase 3 default leaf evaluation (Phase 5: now risk-aware). Same
+        playout policy as rollout_eval (project forward on the current
+        compound, no further stops) but priced with heuristic_evaluator's
+        closed-form, real per-compound components instead of a Monte Carlo
+        run. A closed-form projection has no real variance estimate, so
+        `heuristic_uncertainty` supplies a cheap proxy instead -- this used to
+        be a documented gap (risk_aversion only affected leaves that
+        escalated to a real rollout); now both paths respect it, using the
+        same mean + risk*uncertainty convention as risk_adjusted_reward."""
         remaining_laps = self.num_laps - state.lap
         if remaining_laps <= 0:
             return 0.0
@@ -227,7 +229,9 @@ class MCTSSolver:
             self.fuel_effect_per_lap, self.track_evolution_rate
         )
         cost += calculate_tire_degradation(state.compound, state.tire_age)  # same pre-existing-wear correction rollout_eval applies
-        return -cost
+        uncertainty = heuristic_uncertainty(state.compound, state.tire_age, state.weather_state,
+                                             remaining_laps, state.is_sc_active)
+        return -(cost + self.risk_aversion * uncertainty)
 
     def _should_use_high_fidelity(self, state: MCTSState, reached_via_action: str) -> Tuple[bool, List[str]]:
         """v5 Phase 3 Branch Evaluator. Escalates to a real Monte Carlo rollout
@@ -252,13 +256,20 @@ class MCTSSolver:
     def _edge_cost(self, state: MCTSState, action: str) -> float:
         """Real per-lap transition cost for taking `action` at `state` --
         the v5 Phase 2 replacement for the old flat
-        `base_lap_time + tire_age * 0.10` heuristic."""
+        `base_lap_time + tire_age * 0.10` heuristic. Phase 5: the
+        flexibility bonus is scaled up by risk_aversion -- a risk-averse
+        driver should value preserving pit-stop optionality (a hedge against
+        bad luck) more than a risk-neutral one, not just penalize variance
+        after the fact."""
         pit_loss = self.pit_stop_loss if action != "stay_out" else 0.0
         if state.is_sc_active and pit_loss > 0:
             pit_loss = 8.0
 
         remaining_stops_after = self.max_stops - state.stops_made - (0 if action == "stay_out" else 1)
-        flex_bonus = strategic_flexibility_bonus(state.weather_state, remaining_stops_after, self.flexibility_weight)
+        flex_bonus = strategic_flexibility_bonus(
+            state.weather_state, remaining_stops_after,
+            self.flexibility_weight * (1.0 + self.risk_aversion)
+        )
 
         lap_cost = per_lap_cost(
             state.compound, state.tire_age, state.lap, self.num_laps,

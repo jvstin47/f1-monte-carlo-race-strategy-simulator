@@ -8,6 +8,7 @@ backend/venv/
 backend/.env
 backend/.pytest_cache/
 backend/cache/
+backend/benchmark_suite_results.json
 
 # Node
 frontend/node_modules/

@@ -2,7 +2,9 @@
 
 **Project:** Apex Strategy
 **Version:** v5
-**Status:** In progress — Phases 1-4 of 7 done (see §27)
+**Status:** All 7 phases implemented and empirically evaluated (see §27). "Complete" means
+built, tested, and benchmarked -- not that MCTS beats DP outright; see
+`docs/PHASE2_4_RESULTS.md` and `docs/PHASE6_BENCHMARK_RESULTS.md` for the honest numbers.
 **Primary Goal:** Improve MCTS decision quality in ordinary race conditions by replacing its
 overly simplified traversal assumptions with a calibrated hybrid search architecture.
 
@@ -545,11 +547,20 @@ MCTS experiments must support deterministic seeds. A benchmark should be reprodu
   `refine_top_k` top-K post-search refinement, not the full per-node progressive-budget tiers
   from §14; see `docs/PHASE2_4_RESULTS.md`.)*
 - **Phase 5 — Risk Integration.** Integrate Risk Aversion into MCTS reward. Deliverable: MCTS
-  produces different strategies according to risk preference.
+  produces different strategies according to risk preference. *(Done —
+  `heuristic_evaluator.heuristic_uncertainty` gives the cheap leaf path a risk-aware term it
+  previously lacked, and `strategic_flexibility_bonus` now scales with `risk_aversion`; DP's
+  own risk integration predates v5, see README §5.)*
 - **Phase 6 — Benchmark Suite.** Run all scenario groups against baseline, v4 MCTS, DP, and v5
-  Hybrid MCTS. Deliverable: reproducible performance report.
+  Hybrid MCTS. Deliverable: reproducible performance report. *(Done for groups A-D and F —
+  `backend/benchmark_suite.py`; group E (traffic/undercut) is out of scope, no MCTS/DP
+  integration with the undercut model exists; see `docs/PHASE6_BENCHMARK_RESULTS.md` for a
+  genuinely mixed result, including one scenario where v5 underperforms v4.)*
 - **Phase 7 — Frontend.** Expose search mode, confidence, risk, rollout statistics, strategy
-  explanation. Deliverable: user-facing hybrid optimizer experience.
+  explanation. Deliverable: user-facing hybrid optimizer experience. *(Done —
+  `RaceSimulatorTab`'s Fast/Balanced/High Accuracy search mode selector and the new
+  `MCTSDiagnosticsPanel` component, both driven by real `/optimize-mcts` response data, not
+  placeholder values.)*
 
 ## 28. Research Questions
 

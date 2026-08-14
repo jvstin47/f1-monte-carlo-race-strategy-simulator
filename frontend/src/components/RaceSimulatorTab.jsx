@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { Play, FastForward, CloudRain, ShieldAlert, RotateCcw } from 'lucide-react';
 import MCTSTreeChart from './MCTSTreeChart';
 import DriverSelector from './DriverSelector';
+import MCTSDiagnosticsPanel from './MCTSDiagnosticsPanel';
 
 const COMPOUND_COLORS = {
   soft: '#ef4444',
@@ -11,9 +12,19 @@ const COMPOUND_COLORS = {
   wet: '#3b82f6'
 };
 
+// v5 Phase 7: search-effort presets. Higher accuracy modes spend more MCTS
+// iterations and refine more top root candidates with real Monte Carlo
+// rollouts after the main search (see mcts_optimizer.MCTSSolver.search).
+const SEARCH_MODES = {
+  fast: { label: 'Fast', search_budget: 150, refine_top_k: 1 },
+  balanced: { label: 'Balanced', search_budget: 500, refine_top_k: 2 },
+  accurate: { label: 'High Accuracy', search_budget: 1000, refine_top_k: 3 }
+};
+
 export default function RaceSimulatorTab({ trackId, driverId, onDriverChange, API_BASE, drivers }) {
   const [currentLap, setCurrentLap] = useState(1);
   const [riskAversion, setRiskAversion] = useState(0.2);
+  const [searchMode, setSearchMode] = useState('balanced');
   const [stateOverrides, setStateOverrides] = useState({
     compound: 'medium',
     tire_age: 1,
@@ -30,6 +41,7 @@ export default function RaceSimulatorTab({ trackId, driverId, onDriverChange, AP
     setLoading(true);
     setError(null);
     try {
+      const mode = SEARCH_MODES[searchMode];
       const res = await fetch(`${API_BASE}/optimize-mcts`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -43,7 +55,10 @@ export default function RaceSimulatorTab({ trackId, driverId, onDriverChange, AP
           weather_start_state: stateOverrides.weather_state,
           sc_probability: 0.04,
           current_lap: currentLap,
-          current_state_overrides: stateOverrides
+          current_state_overrides: stateOverrides,
+          search_budget: mode.search_budget,
+          use_hybrid_evaluation: true,
+          refine_top_k: mode.refine_top_k
         })
       });
       const data = await res.json();
@@ -170,7 +185,7 @@ export default function RaceSimulatorTab({ trackId, driverId, onDriverChange, AP
       {/* Driver Selector */}
       <DriverSelector drivers={drivers} selectedDriver={driverId} onSelectDriver={onDriverChange} />
 
-      {/* Risk Aversion */}
+      {/* Risk Aversion & Search Mode */}
       <div className="card" style={{ marginTop: '1rem' }}>
         <div className="form-group slider-container">
           <div className="form-label">
@@ -185,6 +200,36 @@ export default function RaceSimulatorTab({ trackId, driverId, onDriverChange, AP
             value={riskAversion}
             onChange={(e) => setRiskAversion(parseFloat(e.target.value))}
           />
+        </div>
+
+        <div className="form-group" style={{ marginBottom: 0, marginTop: '1rem' }}>
+          <div className="form-label">
+            <span>Search Mode</span>
+          </div>
+          <div style={{ display: 'flex', gap: '0.4rem' }}>
+            {Object.entries(SEARCH_MODES).map(([key, mode]) => (
+              <button
+                key={key}
+                type="button"
+                onClick={() => setSearchMode(key)}
+                style={{
+                  flex: 1,
+                  padding: '0.4rem',
+                  fontSize: '0.75rem',
+                  background: searchMode === key ? 'rgba(225, 6, 0, 0.15)' : 'rgba(255,255,255,0.03)',
+                  border: `1px solid ${searchMode === key ? 'var(--f1-red)' : 'var(--border-color)'}`,
+                  borderRadius: 'var(--radius-sm)',
+                  color: searchMode === key ? 'var(--f1-red)' : 'var(--text-muted)',
+                  cursor: 'pointer'
+                }}
+              >
+                {mode.label}
+              </button>
+            ))}
+          </div>
+          <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
+            {SEARCH_MODES[searchMode].search_budget} iterations, refining top {SEARCH_MODES[searchMode].refine_top_k} candidate{SEARCH_MODES[searchMode].refine_top_k === 1 ? '' : 's'} with real simulation
+          </div>
         </div>
       </div>
 
@@ -214,6 +259,7 @@ export default function RaceSimulatorTab({ trackId, driverId, onDriverChange, AP
             </ul>
           </div>
           <MCTSTreeChart decisionTree={mctsData.decision_tree} />
+          <MCTSDiagnosticsPanel diagnostics={mctsData.diagnostics} policy={mctsData.policy} />
         </>
       )}
     </>

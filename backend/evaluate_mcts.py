@@ -210,31 +210,39 @@ def _compare(baseline_label, baseline_times, candidate_label, candidate_times, n
 
 def evaluate_mcts_vs_dp(num_races=25, track_id="bahrain", seed=42,
                          mcts_budget=60, mcts_rollout_sims=120, replan_interval=6,
-                         run_v4_classic=True, refine_top_k=2, refine_sample_weight=3):
+                         run_v4_classic=True, refine_top_k=2, refine_sample_weight=3,
+                         sc_prob=0.08, weather_start_state="dry", max_stops=2,
+                         verbose=True):
     """Three-way empirical comparison, all against identical per-race weather/
     Safety Car/noise realizations: the DP-optimal fixed schedule, the v4
     "classic" MCTS (every leaf gets a real Monte Carlo rollout), and the v5
     hybrid MCTS (cheap heuristic leaves by default, selective escalation --
     see mcts_optimizer.py). Set run_v4_classic=False to skip the v4 arm and
-    only benchmark v5 vs. DP (faster)."""
+    only benchmark v5 vs. DP (faster).
+
+    sc_prob / weather_start_state / max_stops are exposed (rather than
+    hardcoded) so this function can drive the v5 Phase 6 scenario-group
+    benchmark suite (benchmark_suite.py) without duplicating this logic."""
     np.random.seed(seed)
 
     track = get_track(track_id)
     num_laps = track["num_laps"]
     base_lap_time = track["base_lap_time"]
     pit_stop_time_loss = track["pit_stop_time_loss"]
-    sc_prob = 0.08  # elevated vs. track default to stress-test replanning value
     sc_pit_loss = 8.0
     fuel_effect_per_lap = 0.033
-    max_stops = 2
 
-    print(f"Computing DP-optimal fixed schedule for {track_id}...")
+    def _print(*args, **kwargs):
+        if verbose:
+            print(*args, **kwargs)
+
+    _print(f"Computing DP-optimal fixed schedule for {track_id}...")
     dp_result = optimize_strategy(track_id, ["soft", "medium", "hard"], max_stops=max_stops)
     dp_stints = dp_result["optimal_strategy"]
-    print(f"DP schedule: {[(s['compound'], s['start_lap'], s['end_lap']) for s in dp_stints]}")
+    _print(f"DP schedule: {[(s['compound'], s['start_lap'], s['end_lap']) for s in dp_stints]}")
 
     sc_matrix = generate_safety_car_matrix(num_races, num_laps, sc_probability=sc_prob, seed=seed)
-    weather_matrix = generate_weather_matrix(num_races, num_laps, start_state="dry", seed=seed)
+    weather_matrix = generate_weather_matrix(num_races, num_laps, start_state=weather_start_state, seed=seed)
     noise_matrix = np.random.normal(0, 0.15, size=(num_races, num_laps))
 
     dp_times = simulate_fixed_schedule(
@@ -245,7 +253,7 @@ def evaluate_mcts_vs_dp(num_races=25, track_id="bahrain", seed=42,
     results = {"num_races": num_races, "track_id": track_id}
 
     if run_v4_classic:
-        print(f"\nRunning v4 classic MCTS (every leaf = real rollout) over {num_races} races "
+        _print(f"\nRunning v4 classic MCTS (every leaf = real rollout) over {num_races} races "
               f"(budget={mcts_budget}, rollout_sims={mcts_rollout_sims})...")
         t0 = time.time()
         v4_times, v4_diag = simulate_mcts_rolling(
@@ -256,13 +264,13 @@ def evaluate_mcts_vs_dp(num_races=25, track_id="bahrain", seed=42,
             replan_interval=replan_interval, use_hybrid_evaluation=False
         )
         v4_exec_t = time.time() - t0
-        print(f"  done in {v4_exec_t:.1f}s ({v4_diag['high_fidelity_rollouts']} rollouts, "
+        _print(f"  done in {v4_exec_t:.1f}s ({v4_diag['high_fidelity_rollouts']} rollouts, "
               f"{v4_diag['heuristic_evaluations']} heuristic evals)")
         results["v4_classic_vs_dp"] = _compare("dp", dp_times, "v4_classic", v4_times, num_races)
         results["v4_classic_exec_seconds"] = round(v4_exec_t, 1)
         results["v4_classic_diagnostics"] = v4_diag
 
-    print(f"\nRunning v5 hybrid MCTS (selective escalation + top-{refine_top_k} adaptive "
+    _print(f"\nRunning v5 hybrid MCTS (selective escalation + top-{refine_top_k} adaptive "
           f"refinement) over {num_races} races (budget={mcts_budget}, rollout_sims={mcts_rollout_sims})...")
     t0 = time.time()
     v5_times, v5_diag = simulate_mcts_rolling(
@@ -274,7 +282,7 @@ def evaluate_mcts_vs_dp(num_races=25, track_id="bahrain", seed=42,
         refine_top_k=refine_top_k, refine_sample_weight=refine_sample_weight
     )
     v5_exec_t = time.time() - t0
-    print(f"  done in {v5_exec_t:.1f}s ({v5_diag['high_fidelity_rollouts']} rollouts, "
+    _print(f"  done in {v5_exec_t:.1f}s ({v5_diag['high_fidelity_rollouts']} rollouts, "
           f"{v5_diag['heuristic_evaluations']} heuristic evals)")
     results["v5_hybrid_vs_dp"] = _compare("dp", dp_times, "v5_hybrid", v5_times, num_races)
     results["v5_hybrid_exec_seconds"] = round(v5_exec_t, 1)
@@ -283,17 +291,17 @@ def evaluate_mcts_vs_dp(num_races=25, track_id="bahrain", seed=42,
     if run_v4_classic:
         results["v5_hybrid_vs_v4_classic"] = _compare("v4_classic", v4_times, "v5_hybrid", v5_times, num_races)
 
-    print(f"\n=== Summary ({num_races} races, {track_id}) ===")
+    _print(f"\n=== Summary ({num_races} races, {track_id}) ===")
     if run_v4_classic:
         c = results["v4_classic_vs_dp"]
-        print(f"v4 classic MCTS vs DP:  MCTS wins {c['v4_classic_win_pct']}%, DP wins {c['dp_win_pct']}%, "
+        _print(f"v4 classic MCTS vs DP:  MCTS wins {c['v4_classic_win_pct']}%, DP wins {c['dp_win_pct']}%, "
               f"mean time saved by MCTS {c['mean_time_saved_by_v4_classic']}s  [{v4_exec_t:.1f}s wall]")
     h = results["v5_hybrid_vs_dp"]
-    print(f"v5 hybrid MCTS vs DP:   MCTS wins {h['v5_hybrid_win_pct']}%, DP wins {h['dp_win_pct']}%, "
+    _print(f"v5 hybrid MCTS vs DP:   MCTS wins {h['v5_hybrid_win_pct']}%, DP wins {h['dp_win_pct']}%, "
           f"mean time saved by MCTS {h['mean_time_saved_by_v5_hybrid']}s  [{v5_exec_t:.1f}s wall]")
     if run_v4_classic:
         vv = results["v5_hybrid_vs_v4_classic"]
-        print(f"v5 hybrid vs v4 classic: v5 wins {vv['v5_hybrid_win_pct']}%, v4 wins {vv['v4_classic_win_pct']}%, "
+        _print(f"v5 hybrid vs v4 classic: v5 wins {vv['v5_hybrid_win_pct']}%, v4 wins {vv['v4_classic_win_pct']}%, "
               f"mean time saved by v5 {vv['mean_time_saved_by_v5_hybrid']}s")
 
     return results

@@ -82,6 +82,27 @@ def strategic_flexibility_bonus(weather_state: str, remaining_stops: int,
     return flexibility_weight * remaining_stops * rain_transition_prob
 
 
+def heuristic_uncertainty(compound: str, tire_age: int, weather_state: str,
+                           remaining_laps: int, is_sc_active: bool = False) -> float:
+    """v5 Phase 5: cheap proxy for how much the heuristic_eval point estimate
+    could be wrong, so risk_aversion has something to weigh even on the cheap
+    (non-rollout) leaf path -- previously risk_aversion only affected leaves
+    that escalated to a real Monte Carlo rollout (see docs/PHASE2_4_RESULTS.md).
+    Each factor is independently interpretable, same requirement as the cost
+    components above: more remaining laps compounds uncertainty, non-dry
+    weather is inherently noisier (transition risk + compound-mismatch risk),
+    a tire already past its degradation cliff is less predictable, and an
+    active Safety Car adds a one-off variance spike (duration/bunching risk).
+    Not empirically calibrated against real variance data -- a relative
+    ranking signal for risk_aversion to act on, not a statistical estimate."""
+    base = 0.05 * max(remaining_laps, 0)
+    weather_multiplier = {"dry": 1.0, "damp": 1.6, "wet": 1.4}.get(weather_state, 1.0)
+    cliff_threshold = ALL_COMPOUNDS.get(compound, ALL_COMPOUNDS["medium"]).get("cliff_threshold", 24)
+    cliff_bump = 2.0 if tire_age > cliff_threshold else 0.0
+    sc_bump = 3.0 if is_sc_active else 0.0
+    return (base * weather_multiplier) + cliff_bump + sc_bump
+
+
 def playout_cost(compound: str, tire_age: int, lap: int, num_laps: int,
                   base_lap_time: float, weather_state: str,
                   fuel_effect_per_lap: float = 0.033,

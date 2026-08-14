@@ -1,4 +1,7 @@
-from heuristic_evaluator import lap_cost_components, per_lap_cost, playout_cost, strategic_flexibility_bonus
+from heuristic_evaluator import (
+    lap_cost_components, per_lap_cost, playout_cost, strategic_flexibility_bonus,
+    heuristic_uncertainty,
+)
 
 
 def test_per_lap_cost_is_compound_aware():
@@ -48,6 +51,30 @@ def test_flexibility_bonus_vanishes_with_no_stops_left():
     assert strategic_flexibility_bonus("dry", remaining_stops=0) == 0.0
 
 
+def test_uncertainty_grows_with_remaining_laps():
+    early = heuristic_uncertainty("medium", tire_age=5, weather_state="dry", remaining_laps=50)
+    late = heuristic_uncertainty("medium", tire_age=5, weather_state="dry", remaining_laps=5)
+    assert early > late
+
+
+def test_uncertainty_higher_in_wet_than_dry():
+    dry = heuristic_uncertainty("medium", tire_age=5, weather_state="dry", remaining_laps=20)
+    wet = heuristic_uncertainty("medium", tire_age=5, weather_state="wet", remaining_laps=20)
+    assert wet > dry
+
+
+def test_uncertainty_bumped_by_safety_car():
+    no_sc = heuristic_uncertainty("medium", tire_age=5, weather_state="dry", remaining_laps=20, is_sc_active=False)
+    sc = heuristic_uncertainty("medium", tire_age=5, weather_state="dry", remaining_laps=20, is_sc_active=True)
+    assert sc > no_sc
+
+
+def test_uncertainty_bumped_past_cliff():
+    pre_cliff = heuristic_uncertainty("soft", tire_age=10, weather_state="dry", remaining_laps=20)
+    post_cliff = heuristic_uncertainty("soft", tire_age=20, weather_state="dry", remaining_laps=20)
+    assert post_cliff > pre_cliff
+
+
 if __name__ == "__main__":
     test_per_lap_cost_is_compound_aware()
     test_tire_score_reflects_cliff()
@@ -55,4 +82,8 @@ if __name__ == "__main__":
     test_playout_cost_sums_per_lap_costs()
     test_flexibility_bonus_vanishes_once_wet()
     test_flexibility_bonus_vanishes_with_no_stops_left()
+    test_uncertainty_grows_with_remaining_laps()
+    test_uncertainty_higher_in_wet_than_dry()
+    test_uncertainty_bumped_by_safety_car()
+    test_uncertainty_bumped_past_cliff()
     print("All heuristic_evaluator tests passed.")

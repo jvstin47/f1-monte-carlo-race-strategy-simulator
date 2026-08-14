@@ -82,6 +82,24 @@ def test_best_action_is_legal():
     assert act in ["stay_out", "pit_medium", "pit_hard"]  # pit_soft excluded: already on soft
 
 
+def test_risk_aversion_changes_heuristic_eval():
+    # v5 Phase 5: risk_aversion must affect the cheap heuristic path too, not
+    # just leaves that escalate to a real rollout.
+    state = MCTSState(lap=5, compound="medium", tire_age=5, weather_state="dry", is_sc_active=False, stops_made=0)
+    neutral = _make_solver(risk_aversion=0.0)
+    averse = _make_solver(risk_aversion=1.0)
+    assert neutral.heuristic_eval(state) != averse.heuristic_eval(state)
+
+
+def test_risk_aversion_scales_flexibility_bonus_in_edge_cost():
+    state = MCTSState(lap=5, compound="medium", tire_age=5, weather_state="dry", is_sc_active=False, stops_made=0)
+    neutral = _make_solver(risk_aversion=0.0)
+    averse = _make_solver(risk_aversion=1.0)
+    # Higher risk aversion -> bigger flexibility bonus -> lower (better) edge cost
+    # for staying out (which preserves stops), all else equal.
+    assert averse._edge_cost(state, "stay_out") < neutral._edge_cost(state, "stay_out")
+
+
 if __name__ == "__main__":
     test_hybrid_mode_uses_both_evaluation_paths()
     test_classic_mode_always_uses_high_fidelity()
@@ -90,4 +108,6 @@ if __name__ == "__main__":
     test_pit_action_always_escalates()
     test_adaptive_refinement_adds_weighted_samples()
     test_best_action_is_legal()
+    test_risk_aversion_changes_heuristic_eval()
+    test_risk_aversion_scales_flexibility_bonus_in_edge_cost()
     print("All hybrid MCTS tests passed.")

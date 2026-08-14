@@ -1,7 +1,7 @@
 # 🏎️ Apex Strategy — F1 Race Strategy Engine
 
 **Live:** v4 — NumPy-vectorized Monte Carlo engine, DP optimizer, MCTS rolling replanner, FastAPI + React dashboard.
-**In development:** v5 — Hybrid Strategic Search Engine ([full design doc](docs/V5_DESIGN.md), [Phase 1 results](docs/PHASE1_CALIBRATION_RESULTS.md), [Phases 2-4 results](docs/PHASE2_4_RESULTS.md)).
+**Live:** v5 — Hybrid Strategic Search Engine, all 7 roadmap phases implemented ([full design doc](docs/V5_DESIGN.md), [Phase 1 results](docs/PHASE1_CALIBRATION_RESULTS.md), [Phases 2-4 results](docs/PHASE2_4_RESULTS.md), [Phase 6 benchmark suite](docs/PHASE6_BENCHMARK_RESULTS.md)).
 
 An advanced Formula 1 race strategy simulator: a high-fidelity, stochastic Monte Carlo engine
 in Python/FastAPI, a Dynamic Programming and MCTS strategy optimizer layer, and an interactive
@@ -24,8 +24,9 @@ conditions, even after a 3× search-budget increase) is what set the direction f
 - **v4 state at this turning point:** [`docs/archive/PROJECT_STATUS_v4.md`](docs/archive/PROJECT_STATUS_v4.md)
 - **Frozen v4 README:** [`docs/archive/README_v4.md`](docs/archive/README_v4.md)
 - **v5 design doc:** [`docs/V5_DESIGN.md`](docs/V5_DESIGN.md)
-- **v5 Phase 1 results (calibration harness, done):** [`docs/PHASE1_CALIBRATION_RESULTS.md`](docs/PHASE1_CALIBRATION_RESULTS.md)
-- **v5 Phases 2-4 results (hybrid MCTS, done):** [`docs/PHASE2_4_RESULTS.md`](docs/PHASE2_4_RESULTS.md)
+- **v5 Phase 1 results (calibration harness):** [`docs/PHASE1_CALIBRATION_RESULTS.md`](docs/PHASE1_CALIBRATION_RESULTS.md)
+- **v5 Phases 2-4 results (hybrid MCTS):** [`docs/PHASE2_4_RESULTS.md`](docs/PHASE2_4_RESULTS.md)
+- **v5 Phase 6 results (scenario-group benchmark suite):** [`docs/PHASE6_BENCHMARK_RESULTS.md`](docs/PHASE6_BENCHMARK_RESULTS.md)
 
 ## 🚀 What's live today (v4)
 
@@ -37,7 +38,10 @@ conditions, even after a 3× search-budget increase) is what set the direction f
 
 ## 🧭 v5 Roadmap: Hybrid Strategic Search Engine
 
-**Status: Phases 1-4 of 7 complete.** Full detail in [`docs/V5_DESIGN.md`](docs/V5_DESIGN.md).
+**Status: 7 of 7 phases complete.** Full detail in [`docs/V5_DESIGN.md`](docs/V5_DESIGN.md). "Complete"
+means implemented, tested, and empirically evaluated — not that MCTS beats DP outright yet (it
+doesn't, on average; see below). Some sub-scope was simplified for tractability rather than
+built to the design doc's full spec — noted per-phase.
 
 v5 is not "run MCTS with more iterations." The v4 empirical finding was that a 3× larger search
 budget didn't close MCTS's gap to DP — which means the bottleneck isn't search volume, it's
@@ -54,10 +58,10 @@ decision — instead of treating every node the same way.
 | 1. Instrumentation | Calibration harness quantifying heuristic-vs-simulator disagreement | ✅ **Done** — [results](docs/PHASE1_CALIBRATION_RESULTS.md) |
 | 2. Heuristic Upgrade | Real per-compound tire evaluation replacing the flat traversal heuristic | ✅ **Done** — [results](docs/PHASE2_4_RESULTS.md) |
 | 3. Hybrid Rollout Engine | Selective high-fidelity Monte Carlo evaluation inside the tree | ✅ **Done** — [results](docs/PHASE2_4_RESULTS.md) |
-| 4. Adaptive Budgeting | Progressive rollout budgets by node importance | ✅ **Done** — [results](docs/PHASE2_4_RESULTS.md) |
-| 5. Risk Integration | Risk Aversion wired into MCTS reward (DP already does this as of v4) | ⏳ Not started |
-| 6. Benchmark Suite | Reproducible DP vs. v4 MCTS vs. v5 Hybrid MCTS report across scenario groups | ⏳ Not started |
-| 7. Frontend | Search-mode controls, confidence/risk display, strategy explanations | ⏳ Not started |
+| 4. Adaptive Budgeting | Progressive rollout budgets by node importance | ✅ **Done** (simplified: top-K post-search refinement, not full per-node tiers) — [results](docs/PHASE2_4_RESULTS.md) |
+| 5. Risk Integration | Risk Aversion wired into MCTS reward | ✅ **Done** — cheap heuristic leaves now carry an uncertainty proxy, and the strategic-flexibility bonus scales with risk_aversion, not just high-fidelity rollouts |
+| 6. Benchmark Suite | Reproducible DP vs. v4 MCTS vs. v5 Hybrid MCTS report across scenario groups | ✅ **Done** (Groups A-D, F; Group E out of scope — no undercut/multi-car model exists in MCTS) — [results](docs/PHASE6_BENCHMARK_RESULTS.md) |
+| 7. Frontend | Search-mode controls, confidence/risk display, strategy explanations | ✅ **Done** — Fast/Balanced/High Accuracy search modes, live diagnostics panel, and a plain-language explanation on the Race Sim (MCTS) tab |
 
 **Phase 1 finding, in one line:** the traversal heuristic MCTS uses while descending the tree
 (`base_lap_time + tire_age * 0.10`) assigns **identical cost to pitting for soft vs. hard** in
@@ -75,6 +79,15 @@ solver beat the old one head-to-head in **61%** of races vs. 33%. It still doesn
 average yet, but this is real, measurable progress from a targeted fix, not from throwing more
 compute at the problem. Full writeup, including a sign-convention bug caught before trusting
 the numbers: [`docs/PHASE2_4_RESULTS.md`](docs/PHASE2_4_RESULTS.md).
+
+**Phase 6 result, in one line:** the improvement is *not* uniform across conditions — v5 wins
+clearly in degradation-heavy and weather-transition scenarios, roughly breaks even in ordinary
+and Safety Car conditions, and **loses** to v4 classic in a persistently-wet scenario, where
+almost every decision already escalates to a real rollout and v5's main lever (skipping
+uninteresting cheap leaves) has nowhere to apply. That's a more useful result than a single
+favorable-looking average — it points at a specific, fixable next step (the weather trigger
+doesn't yet distinguish "just changed" from "already settled") instead of hiding it. Full
+scenario-by-scenario breakdown: [`docs/PHASE6_BENCHMARK_RESULTS.md`](docs/PHASE6_BENCHMARK_RESULTS.md).
 
 ---
 
@@ -167,6 +180,9 @@ backend/venv/bin/python backend/calibration_harness.py
 
 # v5 Phases 2-4: DP vs. v4-classic-MCTS vs. v5-hybrid-MCTS (~8.5min for 100 races, all 3 arms)
 backend/venv/bin/python backend/evaluate_mcts.py
+
+# v5 Phase 6: scenario-group benchmark suite (~7min)
+backend/venv/bin/python backend/benchmark_suite.py
 ```
 
 ---
@@ -178,6 +194,7 @@ backend/venv/bin/python backend/evaluate_mcts.py
 | [`docs/V5_DESIGN.md`](docs/V5_DESIGN.md) | Full v5 Hybrid Strategic Search Engine design — goals, architecture, phases, research questions, definition of done |
 | [`docs/PHASE1_CALIBRATION_RESULTS.md`](docs/PHASE1_CALIBRATION_RESULTS.md) | v5 Phase 1 deliverable: quantitative evidence of where the MCTS heuristic disagrees with the real simulator |
 | [`docs/PHASE2_4_RESULTS.md`](docs/PHASE2_4_RESULTS.md) | v5 Phases 2-4 deliverable: the hybrid MCTS implementation and its real DP vs. v4 vs. v5 benchmark |
+| [`docs/PHASE6_BENCHMARK_RESULTS.md`](docs/PHASE6_BENCHMARK_RESULTS.md) | v5 Phase 6 deliverable: DP vs. v4 vs. v5 across dry/degradation/Safety Car/weather/edge-case scenarios |
 | [`docs/archive/PROJECT_STATUS_v4.md`](docs/archive/PROJECT_STATUS_v4.md) | Detailed v4 snapshot at the v4→v5 turning point: architecture, every bug found/fixed, honest metrics |
 | [`docs/archive/README_v4.md`](docs/archive/README_v4.md) | The v4 README, frozen for reference |
 | [`DEPLOYMENT.md`](DEPLOYMENT.md) | Render (backend) + Vercel (frontend) deployment guide |
